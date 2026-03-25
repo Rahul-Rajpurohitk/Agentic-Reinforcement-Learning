@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "agentic-rl"
+version = "0.1.0"
+description = "Agentic Reinforcement Learning - Meta PyTorch OpenEnv Hackathon"
+requires-python = ">=3.10"
+authors = [
+    {name = "Rahul Rajpurohit", email = "rahulrajpurohit2024@gmail.com"},
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
