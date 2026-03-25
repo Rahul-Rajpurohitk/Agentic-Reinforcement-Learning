@@ -5,74 +5,102 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from graders import ExactMatchGrader, RubricGrader
+from graders import KeywordMatchGrader, StrictGrader
 
 
-class TestExactMatchGrader:
+SAMPLE_GROUND_TRUTH = [
+    {
+        "line": "6",
+        "severity": "critical",
+        "category": "bug",
+        "description": "ZeroDivisionError",
+        "keywords": ["zero", "division", "empty", "len"],
+    },
+]
+
+
+class TestKeywordMatchGrader:
     def setup_method(self):
-        self.grader = ExactMatchGrader()
+        self.grader = KeywordMatchGrader()
 
-    def test_correct_answer(self):
+    def test_perfect_match(self):
         result = self.grader.grade(
-            task_id="t1", target="paris", history=["paris"], final_score=1.0
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[{
+                "line": "6",
+                "severity": "critical",
+                "category": "bug",
+                "description": "ZeroDivisionError when empty list, len is zero",
+                "suggestion": "Check for empty list",
+            }],
         )
+        assert result.score > 0.5
         assert result.passed is True
-        assert result.score == 1.0
 
-    def test_wrong_answer(self):
+    def test_no_match(self):
         result = self.grader.grade(
-            task_id="t1", target="paris", history=["london"], final_score=0.0
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[{
+                "line": "1",
+                "severity": "minor",
+                "category": "style",
+                "description": "Bad variable name",
+                "suggestion": "Rename it",
+            }],
         )
+        assert result.score < 0.3
         assert result.passed is False
+
+    def test_empty_agent_issues(self):
+        result = self.grader.grade(
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[],
+        )
         assert result.score == 0.0
 
-    def test_empty_history(self):
+    def test_scores_in_range(self):
         result = self.grader.grade(
-            task_id="t1", target="paris", history=[], final_score=0.0
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[{"description": "something", "suggestion": ""}],
         )
-        assert result.passed is False
+        assert 0.0 <= result.score <= 1.0
 
-    def test_correct_among_multiple(self):
+    def test_no_ground_truth(self):
         result = self.grader.grade(
-            task_id="t1", target="paris", history=["london", "berlin", "paris"], final_score=0.5
+            task_id="t1", ground_truth=[], agent_issues=[]
         )
-        assert result.passed is True
-
-
-class TestRubricGrader:
-    def test_single_criterion(self):
-        grader = RubricGrader(
-            criteria={
-                "correctness": {
-                    "fn": lambda h, t, **kw: 1.0 if t in h else 0.0,
-                    "weight": 1.0,
-                    "description": "Is the answer correct?",
-                },
-            }
-        )
-        result = grader.grade(
-            task_id="t1", target="paris", history=["paris"], final_score=1.0
-        )
-        assert result.passed is True
         assert result.score == 1.0
-
-    def test_multi_criteria(self):
-        grader = RubricGrader(
-            criteria={
-                "correctness": {
-                    "fn": lambda h, t, **kw: 1.0 if t in h else 0.0,
-                    "weight": 0.7,
-                    "description": "Correct answer",
-                },
-                "efficiency": {
-                    "fn": lambda h, t, **kw: max(0, 1.0 - len(h) * 0.1),
-                    "weight": 0.3,
-                    "description": "Fewer attempts",
-                },
-            }
-        )
-        result = grader.grade(
-            task_id="t1", target="paris", history=["paris"], final_score=1.0
-        )
         assert result.passed is True
-        assert result.score > 0.5
+
+
+class TestStrictGrader:
+    def setup_method(self):
+        self.grader = StrictGrader()
+
+    def test_all_found_passes(self):
+        result = self.grader.grade(
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[{
+                "description": "ZeroDivisionError when empty, len is zero",
+                "suggestion": "Check division",
+            }],
+        )
+        assert result.score == 1.0
+        assert result.passed is True
+
+    def test_missing_issue_fails(self):
+        result = self.grader.grade(
+            task_id="t1",
+            ground_truth=SAMPLE_GROUND_TRUTH,
+            agent_issues=[{
+                "description": "Unrelated issue",
+                "suggestion": "Unrelated fix",
+            }],
+        )
+        assert result.score == 0.0
+        assert result.passed is False

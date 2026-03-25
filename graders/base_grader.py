@@ -1,8 +1,6 @@
-"""Base grader interface for OpenEnv environments.
+"""Base grader interface for the Code Review environment.
 
-Graders evaluate complete trajectories (episode histories) and produce
-structured evaluation results. The hackathon uses both programmatic checks
-and LLM-based scoring for evaluation.
+Graders produce deterministic scores in [0.0, 1.0] for each task.
 """
 
 from abc import ABC, abstractmethod
@@ -14,40 +12,25 @@ from typing import Any, Dict, List
 class GradeResult:
     """Structured grading output."""
 
-    score: float  # 0.0 to 1.0
-    passed: bool  # Did the agent pass the task?
-    feedback: str  # Human-readable feedback
-    details: Dict[str, Any] = field(default_factory=dict)  # Detailed breakdown
+    score: float
+    passed: bool
+    feedback: str
+    details: Dict[str, Any] = field(default_factory=dict)
 
 
 class BaseGrader(ABC):
-    """Abstract base class for graders.
-
-    Graders receive the full trajectory and produce a GradeResult.
-    """
+    """Abstract base class for graders."""
 
     @abstractmethod
     def grade(
         self,
         task_id: str,
-        target: str,
-        history: List[str],
-        final_score: float,
+        ground_truth: List[Dict[str, str]],
+        agent_issues: List[Dict[str, str]],
         **kwargs,
     ) -> GradeResult:
-        """Grade a complete episode trajectory.
+        """Grade a completed code review episode.
 
-        Args:
-            task_id: Identifier for the task.
-            target: The ground-truth target/answer.
-            history: List of agent actions taken during the episode.
-            final_score: The environment's final score.
-            **kwargs: Additional context.
-
-        Returns:
-            GradeResult with score, pass/fail, and feedback.
+        Returns GradeResult with score in [0.0, 1.0].
         """
         ...
-
-    def __call__(self, **kwargs) -> GradeResult:
-        return self.grade(**kwargs)

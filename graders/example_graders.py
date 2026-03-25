@@ -1,95 +1,122 @@
-"""Example grader implementations.
+"""Deterministic graders for the Code Review environment.
 
-Adapt these for your specific problem statement.
+Each grader produces reproducible scores between 0.0 and 1.0.
+Graders have clear, deterministic success/failure criteria.
 """
 
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from .base_grader import BaseGrader, GradeResult
 
 
-class ExactMatchGrader(BaseGrader):
-    """Grade based on whether the agent produced the exact target answer."""
+class KeywordMatchGrader(BaseGrader):
+    """Grade based on keyword overlap between found issues and ground truth.
+
+    This is the primary grader — deterministic and reproducible.
+    Score = weighted average of per-issue keyword match scores.
+    """
+
+    def __init__(self, match_threshold: float = 0.3):
+        self.match_threshold = match_threshold
 
     def grade(
         self,
         task_id: str,
-        target: str,
-        history: List[str],
-        final_score: float,
+        ground_truth: List[Dict[str, str]],
+        agent_issues: List[Dict[str, str]],
         **kwargs,
     ) -> GradeResult:
-        if not history:
-            return GradeResult(
-                score=0.0,
-                passed=False,
-                feedback="No actions taken.",
-                details={"task_id": task_id, "attempts": 0},
-            )
+        if not ground_truth:
+            return GradeResult(score=1.0, passed=True, feedback="No issues expected.")
 
-        best_match = max(
-            history,
-            key=lambda h: 1.0 if h.strip().lower() == target.strip().lower() else 0.0,
+        issue_scores = []
+        matched_count = 0
+
+        for truth in ground_truth:
+            keywords = truth.get("keywords", [])
+            best_match = 0.0
+
+            for found in agent_issues:
+                text = (
+                    f"{found.get('description', '')} {found.get('suggestion', '')}"
+                ).lower()
+                if keywords:
+                    match_count = sum(1 for kw in keywords if kw.lower() in text)
+                    match_ratio = match_count / len(keywords)
+                    best_match = max(best_match, match_ratio)
+
+            issue_scores.append(best_match)
+            if best_match >= self.match_threshold:
+                matched_count += 1
+
+        avg_score = sum(issue_scores) / len(issue_scores)
+
+        # Penalize false positives gently
+        false_positives = max(0, len(agent_issues) - matched_count)
+        penalty = min(0.15, false_positives * 0.03)
+        final_score = max(0.0, min(1.0, avg_score - penalty))
+
+        passed = final_score >= 0.5
+
+        feedback = (
+            f"Matched {matched_count}/{len(ground_truth)} issues. "
+            f"Score: {final_score:.3f}."
         )
-        passed = best_match.strip().lower() == target.strip().lower()
+        if false_positives > 0:
+            feedback += f" {false_positives} false positive(s)."
 
         return GradeResult(
-            score=1.0 if passed else 0.0,
+            score=final_score,
             passed=passed,
-            feedback="Correct answer found!" if passed else f"Expected '{target}', not found.",
+            feedback=feedback,
             details={
                 "task_id": task_id,
-                "attempts": len(history),
-                "best_answer": best_match,
-                "target": target,
+                "matched": matched_count,
+                "total_expected": len(ground_truth),
+                "false_positives": false_positives,
+                "per_issue_scores": issue_scores,
             },
         )
 
 
-class RubricGrader(BaseGrader):
-    """Grade based on multiple rubric criteria with weights.
+class StrictGrader(BaseGrader):
+    """Strict grader: requires ALL issues found to pass.
 
-    Each criterion is a callable: (history, target, **kwargs) -> float [0..1]
+    Score = 1.0 if all issues matched, 0.0 otherwise.
+    Used for validating that the hard tasks truly challenge models.
     """
-
-    def __init__(self, criteria: Dict[str, Any]):
-        """
-        Args:
-            criteria: Dict of {name: {"fn": callable, "weight": float, "description": str}}
-        """
-        self.criteria = criteria
 
     def grade(
         self,
         task_id: str,
-        target: str,
-        history: List[str],
-        final_score: float,
+        ground_truth: List[Dict[str, str]],
+        agent_issues: List[Dict[str, str]],
         **kwargs,
     ) -> GradeResult:
-        scores = {}
-        total_weight = 0.0
-        weighted_sum = 0.0
+        if not ground_truth:
+            return GradeResult(score=1.0, passed=True, feedback="No issues expected.")
 
-        for name, criterion in self.criteria.items():
-            fn = criterion["fn"]
-            weight = criterion.get("weight", 1.0)
-            score = fn(history, target, **kwargs)
-            scores[name] = {"score": score, "weight": weight}
-            weighted_sum += score * weight
-            total_weight += weight
+        all_found = True
+        for truth in ground_truth:
+            keywords = truth.get("keywords", [])
+            found = False
+            for issue in agent_issues:
+                text = (
+                    f"{issue.get('description', '')} {issue.get('suggestion', '')}"
+                ).lower()
+                if keywords:
+                    matches = sum(1 for kw in keywords if kw.lower() in text)
+                    if matches / len(keywords) >= 0.3:
+                        found = True
+                        break
+            if not found:
+                all_found = False
+                break
 
-        overall = weighted_sum / total_weight if total_weight > 0 else 0.0
-        passed = overall >= 0.5
-
-        feedback_lines = [f"Overall: {overall:.2f}"]
-        for name, data in scores.items():
-            desc = self.criteria[name].get("description", name)
-            feedback_lines.append(f"  {desc}: {data['score']:.2f} (weight: {data['weight']})")
-
+        score = 1.0 if all_found else 0.0
         return GradeResult(
-            score=overall,
-            passed=passed,
-            feedback="\n".join(feedback_lines),
-            details={"task_id": task_id, "criteria_scores": scores},
+            score=score,
+            passed=all_found,
+            feedback="All issues found!" if all_found else "Not all issues identified.",
+            details={"task_id": task_id, "all_found": all_found},
         )

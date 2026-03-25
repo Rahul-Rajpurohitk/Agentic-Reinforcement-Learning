@@ -4,24 +4,25 @@ openenv-core>=0.2.2
 # Server
 fastapi>=0.104.0
 uvicorn>=0.24.0
-fastmcp>=3.0.0
 pydantic>=2.0.0
 
-# LLM Training (GRPO with TRL)
+# Client
+httpx>=0.25.0
+
+# Baseline Inference
+openai>=1.0.0
+
+# LLM Training (GRPO with TRL) — optional, needs GPU
 trl>=0.17.0
 transformers>=4.40.0
 datasets>=2.18.0
 accelerate>=0.28.0
 
-# HuggingFace Hub
+# HuggingFace Hub (deployment)
 huggingface-hub>=0.22.0
-
-# Experiment Tracking
-trackio
 
 # Testing
 pytest>=7.0.0
-pytest-asyncio>=0.21.0
 
 # Dev Tools
 black

@@ -1,46 +1,67 @@
-"""OpenEnv Client for interacting with the environment server.
+"""OpenEnv client for the Code Review environment.
 
 Usage:
-    client = AgenticRLClient(base_url="http://localhost:8000")
-    obs = client.reset()
-    obs = client.step("my answer")
+    from src.agentic_rl.client import CodeReviewClient
+
+    client = CodeReviewClient(base_url="http://localhost:8000")
+    obs = client.reset(task_id="easy_001")
+    print(obs.code_snippet)
+
+    obs = client.step(issues_found=[...], overall_assessment="request_changes")
+    print(obs.reward, obs.feedback)
 """
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
 
-from .models import AgentAction, EnvObservation, EnvState
+from .models import ReviewAction, ReviewObservation, ReviewState
 
 
-class AgenticRLClient:
-    """HTTP client for the Agentic RL environment server."""
+class CodeReviewClient:
+    """HTTP client for the Code Review environment server."""
 
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(timeout=30.0)
 
-    def reset(self, task_id: Optional[str] = None) -> EnvObservation:
-        """Start a new episode."""
-        payload = {"task_id": task_id} if task_id else {}
-        resp = self._client.post(f"{self.base_url}/reset", json=payload)
+    def reset(self, task_id: str = "easy_001") -> ReviewObservation:
+        """Start a new code review episode."""
+        resp = self._client.post(
+            f"{self.base_url}/reset", json={"task_id": task_id}
+        )
         resp.raise_for_status()
-        return EnvObservation(**resp.json())
+        return ReviewObservation(**resp.json())
 
-    def step(self, response: str, metadata: Optional[dict] = None) -> EnvObservation:
-        """Send an action and get the next observation."""
-        payload = {"response": response}
-        if metadata:
-            payload["metadata"] = metadata
-        resp = self._client.post(f"{self.base_url}/step", json=payload)
+    def step(
+        self,
+        issues_found: List[Dict[str, str]],
+        overall_assessment: str = "request_changes",
+        confidence: float = 1.0,
+    ) -> ReviewObservation:
+        """Submit a code review."""
+        action = ReviewAction(
+            issues_found=issues_found,
+            overall_assessment=overall_assessment,
+            confidence=confidence,
+        )
+        resp = self._client.post(
+            f"{self.base_url}/step", json=action.model_dump()
+        )
         resp.raise_for_status()
-        return EnvObservation(**resp.json())
+        return ReviewObservation(**resp.json())
 
-    def get_state(self) -> EnvState:
-        """Get the current internal state (for debugging/grading)."""
+    def get_state(self) -> ReviewState:
+        """Get internal state (for grading/debugging)."""
         resp = self._client.get(f"{self.base_url}/state")
         resp.raise_for_status()
-        return EnvState(**resp.json())
+        return ReviewState(**resp.json())
+
+    def list_tasks(self) -> list:
+        """List all available tasks."""
+        resp = self._client.get(f"{self.base_url}/tasks")
+        resp.raise_for_status()
+        return resp.json()["tasks"]
 
     def health(self) -> bool:
         """Check if the server is running."""
