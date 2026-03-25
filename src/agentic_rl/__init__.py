@@ -1,3 +1,11 @@
-"""Agentic RL - Meta PyTorch OpenEnv Hackathon Project."""
+"""Code Review OpenEnv Environment — Agentic RL."""
 
-__version__ = "0.1.0"
+from .models import ReviewAction, ReviewObservation, ReviewState
+from .client import CodeReviewEnv
+
+__all__ = [
+    "ReviewAction",
+    "ReviewObservation",
+    "ReviewState",
+    "CodeReviewEnv",
+]
