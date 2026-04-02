@@ -3,13 +3,19 @@
 Core equation (KB-03 Sec 1.1, from KAUST Q-learning paper / FAO Annex 3):
     dW/dt = [Ψ(f,T,DO) × v(UIA) × W^m]  -  [k(T) × W^n]
 
+Stochastic growth model (KB-03 Sec 9.2):
+    dW = [H*W^m - k*W^n] dt + σ_W * W dZ
+    where σ_W = 0.02 (2% growth volatility), dZ = Wiener increment
+
 Enhancements over base model:
 - Size-dependent feeding rate (fingerlings eat 5% BW/day, adults 2%)
 - Density-dependent growth reduction at high stocking
+- Stochastic growth noise (individual variation, KB-03 Sec 9.2)
 - Weight variance tracking (CV of fish weights in population)
 - 24-hour accumulated mortality (not per-call overwrite)
 - Specific Dynamic Action (SDA) metabolic cost of digestion
 - Condition factor tracking (Fulton's K)
+- Nighttime fasting metabolism boost (fish rest but still respire)
 
 Source: FAO Fish Growth Model (Annex 3), arxiv:2306.09915, KB-01 Sec 1-9
 """
@@ -19,6 +25,9 @@ from ..constants import (
     TILAPIA, WATER, SYSTEM, temperature_factor, do_factor, uia_factor
 )
 
+# Stochastic growth volatility (KB-03 Sec 9.2)
+GROWTH_VOLATILITY = 0.02  # σ_W: 2% growth noise (typical for tilapia populations)
+
 
 class FishBiologyEngine:
     """Manages fish population biology: growth, feeding, stress, mortality.
@@ -27,7 +36,7 @@ class FishBiologyEngine:
     higher feeding → faster growth BUT more ammonia excretion → water quality decline.
     """
 
-    def __init__(self):
+    def __init__(self, rng=None):
         self.weight_g: float = TILAPIA.w_initial
         self.population: int = TILAPIA.N_initial
         self.initial_population: int = TILAPIA.N_initial
@@ -47,6 +56,11 @@ class FishBiologyEngine:
         self.sgr: float = 0.0         # specific growth rate %/day
         self._weight_history: list = []  # last 24 weights for SGR calc
 
+        # Stochastic growth state (KB-03 Sec 9.2)
+        import random
+        self._rng = rng or random.Random(42)
+        self._growth_noise: float = 0.0  # accumulated Wiener process state
+
     def reset(self, weight_g: float, population: int, day_of_year: int):
         """Reset fish biology to initial conditions."""
         self.weight_g = weight_g
@@ -65,6 +79,7 @@ class FishBiologyEngine:
         self.condition_factor = 1.0
         self.sgr = 0.0
         self._weight_history = [weight_g]
+        self._growth_noise = 0.0
 
     def grow(self, dt_hours, feeding_rate, temperature, DO, UIA, photoperiod_h):
         """Bioenergetic growth step.
@@ -133,7 +148,18 @@ class FishBiologyEngine:
 
         dw_dt = (anabolism - catabolism - sda_cost) * density_growth_factor
 
-        dw = dw_dt * dt_days
+        # Stochastic growth noise (KB-03 Sec 9.2)
+        # dW = [deterministic] dt + σ_W × W × dZ
+        # Simulates individual growth variation (genetics, micro-feeding differences)
+        # Ornstein-Uhlenbeck-style: mean-reverting with decay
+        dZ = self._rng.gauss(0, 1) * math.sqrt(dt_days)  # Wiener increment
+        stochastic_dw = GROWTH_VOLATILITY * w * dZ
+        # Clamp noise to ±10% of deterministic growth to prevent instability
+        if abs(dw_dt) > 0.01:
+            stochastic_dw = max(-abs(dw_dt * dt_days) * 0.1,
+                                min(abs(dw_dt * dt_days) * 0.1, stochastic_dw))
+
+        dw = dw_dt * dt_days + stochastic_dw
         self.weight_g = max(0.1, self.weight_g + dw)
         self.growth_rate = dw_dt
 

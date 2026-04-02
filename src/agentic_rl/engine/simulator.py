@@ -52,7 +52,7 @@ class FishFarmSimulator:
 
         # Subsystems
         self.water = WaterQualityEngine(SYSTEM.tank_volume_m3, SYSTEM.tank_depth_m)
-        self.fish = FishBiologyEngine()
+        self.fish = FishBiologyEngine(rng=self.rng)
         self.disease = DiseaseEngine()
         self.economics = EconomicsEngine()
         self.weather = WeatherEngine(seed)
@@ -463,6 +463,7 @@ class FishFarmSimulator:
                 "chlorophyll_a": round(self.water.chlorophyll_a, 1),
                 "algae_bloom": self.water.algae_bloom_active,
                 "water_quality_score": round(self.water.get_water_quality_score(), 3),
+                "nighttime_do_risk": round(self.water.nighttime_do_risk, 3),
             },
             "disease": {
                 "active": self.disease.is_active,

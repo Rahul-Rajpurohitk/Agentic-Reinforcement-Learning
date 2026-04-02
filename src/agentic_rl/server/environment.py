@@ -53,6 +53,13 @@ def _build_feedback(sim_state: Dict[str, Any], task_desc: str, hour: int) -> str
     elif water["UIA"] > 0.05:
         parts.append(f"Warning: Toxic ammonia elevated at {water['UIA']:.4f} mg/L.")
 
+    # Nighttime DO crash warning (KB-02 Sec 4 — #1 killer in aquaculture)
+    nighttime_risk = water.get("nighttime_do_risk", 0.0)
+    if nighttime_risk > 0.7:
+        parts.append("DANGER: High nighttime DO crash risk! Increase aeration immediately.")
+    elif nighttime_risk > 0.4:
+        parts.append("Warning: Elevated nighttime DO crash risk. Monitor aeration.")
+
     if water["temperature"] > 35 or water["temperature"] < 22:
         parts.append(f"DANGER: Water temperature at {water['temperature']:.1f}C — outside safe range!")
 
@@ -267,6 +274,7 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
             nitrate=water.get("NO3", 0.0),
             water_quality_score=water["water_quality_score"],
             algae_bloom=water.get("algae_bloom", False),
+            nighttime_do_risk=water.get("nighttime_do_risk", 0.0),
             # Equipment
             aerator_working=equip.get("aerator", True),
             biofilter_working=equip.get("biofilter", True),

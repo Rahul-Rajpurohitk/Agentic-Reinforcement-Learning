@@ -46,6 +46,13 @@ class WaterQualityEngine:
         self.chlorophyll_a: float = 5.0  # baseline moderate algae
         self.algae_bloom_active: bool = False
 
+        # Nighttime DO crash risk tracking (KB-02 Sec 4)
+        # The #1 killer in real aquaculture: algae produce O2 by day but consume
+        # it at night, and high biomass can crash DO to lethal levels.
+        self.nighttime_do_risk: float = 0.0  # 0.0 = safe, 1.0 = imminent crash
+        self._do_history: list = []  # rolling DO for trend detection
+        self._peak_daytime_do: float = 7.0  # track daytime DO peaks
+
     def reset(self, temp: float, DO: float, TAN: float, pH: float, NO2: float):
         """Reset water quality to initial conditions."""
         self.temperature = temp
@@ -57,6 +64,9 @@ class WaterQualityEngine:
         self.alkalinity = 150.0
         self.chlorophyll_a = 5.0
         self.algae_bloom_active = False
+        self.nighttime_do_risk = 0.0
+        self._do_history = []
+        self._peak_daytime_do = DO
         self._update_uia()
 
     def _update_uia(self):
@@ -361,9 +371,34 @@ class WaterQualityEngine:
                 self._evap_mm_day = getattr(self, '_evap_mm_day', 0.0) + evap_mm_h * dt_h
 
         # ================================================================
-        # 9. UPDATE DERIVED VALUES
+        # 9. UPDATE DERIVED VALUES + NIGHTTIME DO CRASH RISK
         # ================================================================
         self._update_uia()
+
+        # Track DO history for trend detection (rolling 6h window)
+        self._do_history.append(self.DO)
+        if len(self._do_history) > 60:  # 60 sub-steps = 6 hours
+            self._do_history = self._do_history[-60:]
+
+        # Track daytime DO peaks (high daytime DO + algae = nighttime crash risk)
+        if daytime:
+            self._peak_daytime_do = max(self._peak_daytime_do * 0.99, self.DO)
+        else:
+            # Nighttime DO crash risk assessment (KB-02 Sec 4)
+            # Risk factors: high chlorophyll-a, high daytime DO peak (supersaturation),
+            # high fish biomass, low aeration
+            algae_risk = min(1.0, self.chlorophyll_a / 80.0)  # >80 μg/L = high risk
+            # DO swing amplitude: high day peak relative to current night DO
+            swing = max(0, self._peak_daytime_do - self.DO)
+            swing_risk = min(1.0, swing / 4.0)  # 4 mg/L swing = dangerous
+            # Trend: is DO declining over recent sub-steps?
+            if len(self._do_history) >= 10:
+                recent_trend = self._do_history[-1] - self._do_history[-10]
+                trend_risk = min(1.0, max(0, -recent_trend) / 1.0)
+            else:
+                trend_risk = 0.0
+            self.nighttime_do_risk = min(1.0,
+                algae_risk * 0.4 + swing_risk * 0.35 + trend_risk * 0.25)
 
     def _two_stage_nitrification(self, biofilter_eff: float) -> tuple:
         """Two-stage nitrification rates for Nitrosomonas (AOB) and Nitrobacter (NOB).

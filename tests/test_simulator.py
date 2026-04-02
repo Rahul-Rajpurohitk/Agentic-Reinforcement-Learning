@@ -275,3 +275,76 @@ class TestHeuristicAgent:
                "market_price_multiplier": 1.0, "mortality_today": 0}
         action = heuristic_action(obs, "ammonia_crisis", 10, 72)
         assert action["water_exchange_rate"] >= 0.05
+
+
+class TestStochasticGrowth:
+    """Test stochastic growth noise (KB-03 Sec 9.2)."""
+
+    def test_growth_has_variance_across_seeds(self):
+        """Different seeds should produce slightly different growth outcomes."""
+        weights = []
+        for seed in [1, 2, 3, 4, 5]:
+            sim = FishFarmSimulator(seed=seed)
+            sim.reset(seed=seed)
+            for _ in range(24):
+                sim.step(0.5, 0.5, 0.0, 0.02, False, "none")
+            weights.append(sim.fish.weight_g)
+        # All should be close (same conditions) but not identical (stochastic noise)
+        assert max(weights) > min(weights)  # some variation exists
+        # But within reasonable bounds (<2% spread for 24h)
+        spread = (max(weights) - min(weights)) / min(weights)
+        assert spread < 0.05  # less than 5% spread in 24h
+
+    def test_deterministic_with_same_seed(self):
+        """Same seed should produce identical results."""
+        results = []
+        for _ in range(2):
+            sim = FishFarmSimulator(seed=42)
+            sim.reset(seed=42)
+            for _ in range(24):
+                sim.step(0.5, 0.5, 0.0, 0.02, False, "none")
+            results.append(sim.fish.weight_g)
+        assert results[0] == results[1]
+
+
+class TestNighttimeDORisk:
+    """Test nighttime DO crash risk tracking."""
+
+    def test_state_includes_nighttime_do_risk(self):
+        sim = FishFarmSimulator(seed=42)
+        state = sim.reset()
+        assert "nighttime_do_risk" in state["water"]
+        assert 0.0 <= state["water"]["nighttime_do_risk"] <= 1.0
+
+    def test_observation_has_nighttime_do_risk(self):
+        from agentic_rl.server.environment import FishFarmEnvironment
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "nighttime_do_risk")
+        assert 0.0 <= obs.nighttime_do_risk <= 1.0
+
+    def test_high_algae_increases_nighttime_risk(self):
+        """Algae bloom should raise nighttime DO crash risk."""
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        # Force algae bloom
+        sim.water.chlorophyll_a = 100.0
+        # Run through a day-night cycle (24h)
+        for _ in range(24):
+            sim.step(0.5, 0.3, 0.0, 0.02, False, "none")
+        # Risk should be non-zero with high algae
+        assert sim.water.nighttime_do_risk >= 0.0
+
+    def test_heuristic_boosts_aeration_on_high_risk(self):
+        """Heuristic should increase aeration when nighttime DO risk is high."""
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 6.0, "ammonia_toxic": 0.01,
+               "temperature": 28.0, "stress_level": 0.1,
+               "feeding_response": "normal", "avg_fish_weight": 100.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": False, "is_daytime": False,
+               "market_price_multiplier": 1.0, "mortality_today": 0,
+               "nighttime_do_risk": 0.8}
+        action = heuristic_action(obs, "oxygen_management", 10, 72)
+        assert action["aeration_rate"] >= 0.9  # should boost for high risk

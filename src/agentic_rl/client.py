@@ -66,6 +66,7 @@ class FishFarmEnv(EnvClient[FarmAction, FarmObservation, FarmState]):
             nitrate=obs_data.get("nitrate", 0.0),
             water_quality_score=obs_data.get("water_quality_score", 1.0),
             algae_bloom=obs_data.get("algae_bloom", False),
+            nighttime_do_risk=obs_data.get("nighttime_do_risk", 0.0),
             # Equipment
             aerator_working=obs_data.get("aerator_working", True),
             biofilter_working=obs_data.get("biofilter_working", True),

@@ -121,6 +121,7 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     disease_suspected = obs.get("disease_suspected", False)
     is_daytime = obs.get("is_daytime", True)
     market_mult = obs.get("market_price_multiplier", 1.0)
+    nighttime_do_risk = obs.get("nighttime_do_risk", 0.0)
     hours_left = max_hours - step
 
     # ---- Aeration ----
@@ -128,6 +129,8 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         aeration = 1.0  # emergency
     elif DO < 5.0:
         aeration = 0.8
+    elif nighttime_do_risk > 0.6:
+        aeration = 0.9  # preemptive: high nighttime crash risk
     elif not is_daytime:
         aeration = 0.6  # nighttime needs more
     else:
@@ -239,6 +242,7 @@ WATER QUALITY:
   Nitrate (NO3):   {obs.get('nitrate', 0):.1f} mg/L
   WQ Score:        {obs.get('water_quality_score', 0):.3f}/1.000
   Algae Bloom:     {'YES — DO will swing!' if obs.get('algae_bloom', False) else 'No'}
+  Night DO Risk:   {obs.get('nighttime_do_risk', 0):.2f}  {'⚠ HIGH — boost aeration!' if obs.get('nighttime_do_risk', 0) > 0.5 else '(0=safe, 1=crash imminent)'}
 
 FISH:
   Weight: {obs.get('avg_fish_weight', 0):.1f}g | Population: {obs.get('population', 0):,} | Biomass: {obs.get('biomass_kg', 0):.1f}kg
@@ -363,12 +367,15 @@ def should_call_llm(obs: Dict[str, Any], step: int, last_llm_step: int,
     disease = obs.get("disease_suspected", False)
     storm = obs.get("storm_active", False)
 
+    nighttime_do_risk = obs.get("nighttime_do_risk", 0.0)
+
     is_crisis = (
         DO < 3.0
         or UIA > 0.1
         or mortality > 20
         or disease
         or storm
+        or nighttime_do_risk > 0.7
     )
 
     if is_crisis:

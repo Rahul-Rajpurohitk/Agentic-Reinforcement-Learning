@@ -78,6 +78,7 @@ class FarmObservation(Observation):
     nitrate: float = Field(default=0.0, description="Nitrate NO3 (mg/L). Product of nitrification")
     water_quality_score: float = Field(default=1.0, description="Composite water quality (0-1)")
     algae_bloom: bool = Field(default=False, description="Is algae bloom active (DO swings)")
+    nighttime_do_risk: float = Field(default=0.0, description="Nighttime DO crash risk (0=safe, 1=imminent). Increase aeration if high.")
 
     # System status
     aerator_working: bool = Field(default=True, description="Is the aerator functioning?")
