@@ -65,12 +65,17 @@ SYSTEM_PROMPT = """You are an expert Nile Tilapia aquaculture manager running a 
 ## Critical Cascade to Prevent
 Overfeeding → ammonia rises → nitrification consumes O2 → DO drops → stress increases → disease risk → mass mortality. This is the #1 failure mode.
 
+## Growth Stage Strategy (priorities shift as fish grow)
+- JUVENILE (<50g): Prioritize water quality stability and survival over growth. Feed conservatively (0.3-0.4). Ammonia spikes kill small fish fast.
+- GROW-OUT (50-300g): Prioritize feeding efficiency and growth. Feed moderately (0.4-0.6). This is the money-making phase — FCR matters most here.
+- PRE-HARVEST (>300g): Prioritize profit and harvest timing. Watch market prices. Fish are hardy now — feed aggressively (0.5-0.7) for final weight push.
+
 ## Decision Framework by Priority
 1. SURVIVAL: Keep DO >5, UIA <0.05, temp 27-32°C. If any parameter is critical, address it FIRST.
 2. DISEASE: If mortality spikes or feeding becomes sluggish/refusing, apply 'antibiotics' immediately. If no disease yet and >30 days remain, consider 'vaccination' for prevention.
 3. WATER QUALITY: Balance feeding against ammonia. Use water exchange (0.02-0.05) for ammonia control. Use aeration for DO.
-4. GROWTH: Feed aggressively (0.5-0.7) only when water quality is good. Reduce feed (0.2-0.3) if UIA >0.03 or DO <5.
-5. ECONOMICS: Monitor feed price (it fluctuates). Harvest when fish reach 400g+ AND market_price_multiplier >1.0 if possible. Don't harvest if price is crashed (<0.8x) unless episode is ending.
+4. GROWTH: Feed rate depends on growth stage (see above). Reduce feed if UIA >0.03 or DO <5.
+5. ECONOMICS: Monitor feed price (it fluctuates). Feed is 50-70% of costs — if feed_price is >$0.60/kg, reduce feeding slightly. Harvest when fish reach 400g+ AND market_price_multiplier >1.0 if possible. Don't harvest if price is crashed (<0.8x) unless episode is ending.
 
 ## Treatment Guide
 - 'antibiotics': Use during active disease. Doubles recovery rate but harms biofilter (reduces TAN removal).
@@ -122,15 +127,21 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     is_daytime = obs.get("is_daytime", True)
     market_mult = obs.get("market_price_multiplier", 1.0)
     nighttime_do_risk = obs.get("nighttime_do_risk", 0.0)
+    feed_price = obs.get("feed_price_per_kg", 0.50)
     hours_left = max_hours - step
 
-    # ---- Aeration ----
+    # ---- Aeration (proactive nighttime crash prevention) ----
+    algae_bloom = obs.get("algae_bloom", False)
     if DO < 3.0:
         aeration = 1.0  # emergency
     elif DO < 5.0:
         aeration = 0.8
-    elif nighttime_do_risk > 0.6:
-        aeration = 0.9  # preemptive: high nighttime crash risk
+    elif nighttime_do_risk > 0.7:
+        aeration = 1.0  # imminent crash — full power
+    elif nighttime_do_risk > 0.4:
+        aeration = 0.85  # elevated risk — preemptive boost
+    elif algae_bloom and not is_daytime:
+        aeration = 0.9  # algae bloom + nighttime = high DO crash risk
     elif not is_daytime:
         aeration = 0.6  # nighttime needs more
     else:
@@ -139,7 +150,7 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     if not aerator_ok:
         aeration = 0.0  # broken
 
-    # ---- Feeding ----
+    # ---- Feeding (growth-stage aware) ----
     if feeding_resp == "refusing" or DO < 2.0 or UIA > 0.3:
         feeding = 0.0  # don't waste feed on stressed fish
     elif feeding_resp == "sluggish" or DO < 4.0 or UIA > 0.05:
@@ -148,10 +159,19 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         feeding = 0.2
     elif feed_remaining < 20.0:
         feeding = 0.15  # conserve inventory
-    elif is_daytime:
-        feeding = 0.5  # normal daytime
+    elif weight < 50:
+        # Juvenile: conservative feeding (water quality stability priority)
+        feeding = 0.35 if is_daytime else 0.2
+    elif weight < 300:
+        # Grow-out: moderate-aggressive (FCR + growth priority)
+        feeding = 0.55 if is_daytime else 0.35
     else:
-        feeding = 0.3  # reduced at night
+        # Pre-harvest: aggressive for final weight push
+        feeding = 0.65 if is_daytime else 0.4
+
+    # Feed price adjustment: reduce feeding when feed is expensive (>20% above mean)
+    if feed_price > 0.60 and feeding > 0.2:
+        feeding *= 0.85  # cut 15% when feed is pricey
 
     # ---- Water exchange ----
     if UIA > 0.1 or TAN > 2.0:
@@ -263,7 +283,9 @@ ECONOMICS:
   Marginal Cost: ${obs.get('marginal_cost_per_hour', 0):.2f}/hr | ROI: {obs.get('roi_pct', 0):.1f}%
   Feed Stock: {obs.get('feed_remaining_kg', 0):.0f}kg
 
-EQUIPMENT: Aerator={'OK' if obs.get('aerator_working', True) else 'FAILED'} | Biofilter={'OK' if obs.get('biofilter_working', True) else 'FAILED'} | Heater={'OK' if obs.get('heater_working', True) else 'FAILED'}"""
+EQUIPMENT: Aerator={'OK' if obs.get('aerator_working', True) else 'FAILED'} | Biofilter={'OK' if obs.get('biofilter_working', True) else 'FAILED'} | Heater={'OK' if obs.get('heater_working', True) else 'FAILED'}
+
+GROWTH STAGE: {'JUVENILE (<50g) — prioritize water quality' if obs.get('avg_fish_weight', 0) < 50 else 'GROW-OUT (50-300g) — prioritize feeding efficiency' if obs.get('avg_fish_weight', 0) < 300 else 'PRE-HARVEST (>300g) — prioritize profit + harvest timing'}"""
 
     # Alerts
     alerts = obs.get('alerts', [])
