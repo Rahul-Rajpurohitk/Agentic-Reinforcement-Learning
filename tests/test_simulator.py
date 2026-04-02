@@ -146,3 +146,132 @@ class TestSimulatorBasics:
 
         # Warm conditions should produce more disease deaths
         assert de_warm.total_disease_deaths >= de_cold.total_disease_deaths
+
+
+class TestObservationCompleteness:
+    """Verify the FarmObservation includes all enhanced fields."""
+
+    def test_observation_has_fish_growth_fields(self):
+        """Observation should include FCR, SGR, growth rate, stocking density."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        from agentic_rl.models import FarmAction
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "fcr")
+        assert hasattr(obs, "sgr")
+        assert hasattr(obs, "growth_rate_g_day")
+        assert hasattr(obs, "stocking_density")
+
+    def test_observation_has_economics_fields(self):
+        """Observation should include stochastic feed price, ROI, marginal cost."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        from agentic_rl.models import FarmAction
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        step_obs = env.step(FarmAction(feeding_rate=0.5, aeration_rate=0.5))
+        assert hasattr(step_obs, "feed_price_per_kg")
+        assert hasattr(step_obs, "market_price_multiplier")
+        assert hasattr(step_obs, "marginal_cost_per_hour")
+        assert hasattr(step_obs, "roi_pct")
+        assert step_obs.feed_price_per_kg > 0
+
+    def test_observation_has_weather_fields(self):
+        """Observation should include daytime, storm, humidity."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        from agentic_rl.models import FarmAction
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "is_daytime")
+        assert hasattr(obs, "storm_active")
+        assert hasattr(obs, "humidity")
+
+    def test_observation_has_disease_signal(self):
+        """Observation should have disease_suspected (behavioral indicator)."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "disease_suspected")
+        # No disease initially
+        assert obs.disease_suspected is False
+
+    def test_observation_has_survival_fields(self):
+        """Observation should include cumulative mortality and survival rate."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "cumulative_mortality")
+        assert hasattr(obs, "survival_rate")
+        assert obs.survival_rate == 1.0
+
+    def test_observation_has_nitrate_and_algae(self):
+        """Observation should include NO3 and algae bloom status."""
+        from agentic_rl.server.environment import FishFarmEnvironment
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        assert hasattr(obs, "nitrate")
+        assert hasattr(obs, "algae_bloom")
+
+
+class TestHeuristicAgent:
+    """Test the rule-based heuristic fallback agent."""
+
+    def test_heuristic_reduces_feed_on_low_do(self):
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 2.0, "ammonia_toxic": 0.01,
+               "temperature": 28.0, "stress_level": 0.3,
+               "feeding_response": "sluggish", "avg_fish_weight": 100.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": False, "is_daytime": True,
+               "market_price_multiplier": 1.0}
+        action = heuristic_action(obs, "feeding_basics", 10, 168)
+        assert action["feeding_rate"] <= 0.2
+        assert action["aeration_rate"] == 1.0  # emergency DO
+
+    def test_heuristic_treats_disease(self):
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 6.0, "ammonia_toxic": 0.01,
+               "temperature": 28.0, "stress_level": 0.5,
+               "feeding_response": "sluggish", "avg_fish_weight": 200.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": True, "mortality_today": 15,
+               "is_daytime": True, "market_price_multiplier": 1.0}
+        action = heuristic_action(obs, "disease_outbreak", 50, 240)
+        assert action["treatment"] == "antibiotics"
+
+    def test_heuristic_harvests_at_market_weight(self):
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 7.0, "ammonia_toxic": 0.01,
+               "temperature": 28.0, "stress_level": 0.1,
+               "feeding_response": "eager", "avg_fish_weight": 550.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": False, "is_daytime": True,
+               "market_price_multiplier": 1.15, "mortality_today": 0}
+        action = heuristic_action(obs, "full_growout", 1400, 1440)
+        assert action["harvest_decision"] is True
+
+    def test_heuristic_heats_cold_water(self):
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 7.0, "ammonia_toxic": 0.01,
+               "temperature": 22.0, "stress_level": 0.2,
+               "feeding_response": "normal", "avg_fish_weight": 100.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": False, "is_daytime": True,
+               "market_price_multiplier": 1.0, "mortality_today": 0}
+        action = heuristic_action(obs, "temperature_stress", 10, 120)
+        assert action["heater_setting"] > 0
+
+    def test_heuristic_increases_exchange_for_high_ammonia(self):
+        from inference import heuristic_action
+        obs = {"dissolved_oxygen": 6.0, "ammonia_toxic": 0.15, "ammonia": 2.5,
+               "temperature": 28.0, "stress_level": 0.3,
+               "feeding_response": "sluggish", "avg_fish_weight": 150.0,
+               "population": 5000, "feed_remaining_kg": 200.0,
+               "biofilter_working": True, "aerator_working": True,
+               "disease_suspected": False, "is_daytime": True,
+               "market_price_multiplier": 1.0, "mortality_today": 0}
+        action = heuristic_action(obs, "ammonia_crisis", 10, 72)
+        assert action["water_exchange_rate"] >= 0.05

@@ -229,6 +229,16 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
         events = sim_state.get("events", {})
         equip = events.get("equipment", {})
 
+        # Disease suspected: agent can't see SEIR counts but can infer from
+        # behavioral signals (mortality spikes + feeding refusal + stress)
+        disease = sim_state.get("disease", {})
+        disease_suspected = (
+            disease.get("active", False)
+            and (fish["mortality_today"] > 5
+                 or fish["feeding_response"] in ("sluggish", "refusing")
+                 or fish["stress_level"] > 0.4)
+        )
+
         return FarmObservation(
             done=done,
             reward=reward,
@@ -238,9 +248,15 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
             avg_fish_weight=fish["weight_g"],
             population=fish["population"],
             mortality_today=fish["mortality_today"],
+            cumulative_mortality=fish["cumulative_mortality"],
+            survival_rate=fish["survival_rate"],
             stress_level=fish["stress_level"],
             feeding_response=fish["feeding_response"],
             biomass_kg=fish["biomass_kg"],
+            growth_rate_g_day=fish["growth_rate_g_day"],
+            fcr=fish.get("fcr", 0.0),
+            sgr=fish.get("sgr", 0.0),
+            stocking_density=fish.get("stocking_density", 0.0),
             # Water
             temperature=water["temperature"],
             dissolved_oxygen=water["DO"],
@@ -248,7 +264,9 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
             ammonia=water["TAN"],
             ammonia_toxic=water["UIA"],
             nitrite=water["NO2"],
+            nitrate=water.get("NO3", 0.0),
             water_quality_score=water["water_quality_score"],
+            algae_bloom=water.get("algae_bloom", False),
             # Equipment
             aerator_working=equip.get("aerator", True),
             biofilter_working=equip.get("biofilter", True),
@@ -258,11 +276,22 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
             current_fish_value=econ["fish_value"],
             total_cost_so_far=econ["total_cost"],
             current_profit=econ["current_profit"],
-            # Context
+            feed_price_per_kg=econ.get("feed_price_per_kg", 0.50),
+            market_price_multiplier=econ.get("market_price_multiplier", 1.0),
+            marginal_cost_per_hour=econ.get("marginal_cost_per_hour", 0.0),
+            roi_pct=econ.get("roi_pct", 0.0),
+            # Weather
             weather_forecast=weather["forecast"],
+            is_daytime=weather.get("is_daytime", True),
+            storm_active=weather.get("storm_active", False),
+            humidity=weather.get("humidity", 75.0),
+            # Context
             day_in_cycle=sim_state["time"]["day"],
             time_of_day=sim_state["time"]["hour"],
+            day_of_year=sim_state["time"].get("day_of_year", 1),
             alerts=events.get("active_events", []),
+            # Disease behavioral signal
+            disease_suspected=disease_suspected,
             # Feedback
             feedback=feedback,
         )
