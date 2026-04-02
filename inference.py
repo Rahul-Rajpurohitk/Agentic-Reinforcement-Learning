@@ -213,6 +213,13 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         elif task_id == "catastrophe_prevention" and 96 <= step <= 108:
             treatment = "vaccination"  # vaccinate before disease event at h120
 
+    # Storm pre-positioning: boost aeration and reduce feeding before storm hits
+    if task_id == "storm_response" and step < 24:
+        # Pre-storm: supersaturate DO, reduce feeding to lower ammonia baseline
+        aeration = max(aeration, 0.8)  # build up DO reserves
+        feeding *= 0.7  # lower ammonia before equipment goes offline
+        exchange = max(exchange, 0.04)  # flush ammonia pre-storm
+
     # ---- Harvest ----
     harvest = False
 
@@ -228,6 +235,9 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     # Harvest on last step
     elif hours_left <= 1 and weight > 100:
         harvest = True
+    # Catastrophe task: harvest before feed shortage if fish are heavy enough
+    elif task_id == "catastrophe_prevention" and weight >= 350 and market_mult < 0.7 and hours_left < 96:
+        harvest = True  # cut losses in market crash + feed shortage
 
     return {
         "feeding_rate": round(feeding, 2),
