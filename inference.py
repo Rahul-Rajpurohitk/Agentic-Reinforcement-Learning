@@ -1,7 +1,7 @@
 """Fish Farm LLM Agent — inference script for OpenEnv evaluation.
 
-Connects to the Fish Farm environment via HTTP, runs all tasks using an LLM
-to make management decisions, and reports scores.
+Connects to the Fish Farm environment via WebSocket (persistent session),
+runs all tasks using an LLM to make management decisions, and reports scores.
 
 Architecture:
 1. LLM-based agent with domain-expert system prompt
@@ -11,7 +11,7 @@ Architecture:
 
 Required environment variables:
     API_BASE_URL: LLM API endpoint (e.g., https://api.openai.com/v1)
-    MODEL_NAME: Model to use (e.g., gpt-4o, claude-3-sonnet)
+    MODEL_NAME: Model to use (e.g., gpt-4o, nemotron-3-super)
     HF_TOKEN: HuggingFace token for authentication
 
 Runtime constraint: < 20 minutes on 2 vCPU / 8GB RAM
@@ -19,6 +19,7 @@ Strategy: Run easy tasks first (shortest episodes), limit history window,
 batch requests where possible, heuristic fallback for speed.
 """
 
+import asyncio
 import json
 import os
 import time
@@ -486,28 +487,26 @@ def should_call_llm(obs: Dict[str, Any], step: int, last_llm_step: int,
     return steps_since_llm >= base_interval
 
 
-# ---- Task Runner ----
+# ---- Task Runner (WebSocket-based, persistent session) ----
 
-def run_task(
-    client: OpenAI,
-    env_client: httpx.Client,
+async def run_task_ws(
+    llm_client: OpenAI,
+    env_url: str,
     task_id: str,
     task_description: str,
     max_hours: int,
     time_budget_s: float,
 ) -> Dict[str, Any]:
-    """Run a single task and return results."""
+    """Run a single task via WebSocket (stateful session)."""
+    import websockets
+
     print(f"\n{'='*60}")
     print(f"  Task: {task_id} ({max_hours}h = {max_hours/24:.0f} days)")
     print(f"{'='*60}")
 
-    # Reset environment
-    reset_resp = env_client.post(
-        f"{ENV_URL}/reset",
-        json={"task_id": task_id},
-    )
-    reset_resp.raise_for_status()
-    obs = reset_resp.json()
+    # Convert HTTP URL to WebSocket URL
+    ws_url = env_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = f"{ws_url}/ws"
 
     history: List[Dict[str, Any]] = []
     total_reward = 0.0
@@ -515,11 +514,8 @@ def run_task(
     start_time = time.time()
     llm_calls = 0
     heuristic_calls = 0
-    last_llm_step = -10  # force first LLM call
+    last_llm_step = -10
 
-    # Decide base LLM call interval based on episode length and time budget
-    # Shorter episodes get more frequent calls (every step)
-    # Longer episodes get less frequent (every 4-6 hours)
     if max_hours <= 72:
         base_interval = 1
     elif max_hours <= 168:
@@ -529,83 +525,104 @@ def run_task(
     else:
         base_interval = 6
 
-    # Per-step time budget: stop using LLM if running out of time
-    per_task_budget = time_budget_s * 0.85  # 85% of allocated time
+    per_task_budget = time_budget_s * 0.85
 
-    current_action = heuristic_action(obs, task_id, 0, max_hours)
+    async with websockets.connect(ws_url, open_timeout=30, max_size=100 * 1024 * 1024) as ws:
+        # Reset
+        await ws.send(json.dumps({
+            "type": "reset",
+            "data": {"task_id": task_id},
+        }))
+        response = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
+        if response.get("type") == "error":
+            raise RuntimeError(f"Reset error: {response}")
+        resp_data = response.get("data", {})
+        obs = resp_data.get("observation", {})
+        is_done = resp_data.get("done", False)
 
-    while not obs.get("done", False) and steps < max_hours:
-        elapsed = time.time() - start_time
-        use_llm = (
-            elapsed < per_task_budget
-            and should_call_llm(obs, steps, last_llm_step, base_interval)
-        )
+        current_action = heuristic_action(obs, task_id, 0, max_hours)
 
-        if use_llm:
-            prompt = build_observation_prompt(
-                task_description, obs, history, steps, max_hours,
+        while not is_done and steps < max_hours:
+            elapsed = time.time() - start_time
+            use_llm = (
+                elapsed < per_task_budget
+                and should_call_llm(obs, steps, last_llm_step, base_interval)
             )
-            try:
-                completion = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.2,
-                    max_tokens=200,
+
+            if use_llm:
+                prompt = build_observation_prompt(
+                    task_description, obs, history, steps, max_hours,
                 )
-                response_text = completion.choices[0].message.content or "{}"
-                current_action = parse_action(response_text)
-                llm_calls += 1
-                last_llm_step = steps
-            except Exception as e:
-                print(f"  [Step {steps}] LLM error: {e}")
-                current_action = heuristic_action(obs, task_id, steps, max_hours)
-                heuristic_calls += 1
-        else:
-            # Use heuristic when LLM isn't called
-            if steps - last_llm_step > base_interval:
-                current_action = heuristic_action(obs, task_id, steps, max_hours)
-                heuristic_calls += 1
+                try:
+                    completion = llm_client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.2,
+                        max_tokens=200,
+                    )
+                    response_text = completion.choices[0].message.content or "{}"
+                    current_action = parse_action(response_text)
+                    llm_calls += 1
+                    last_llm_step = steps
+                except Exception as e:
+                    print(f"  [Step {steps}] LLM error: {e}")
+                    current_action = heuristic_action(obs, task_id, steps, max_hours)
+                    heuristic_calls += 1
+            else:
+                if steps - last_llm_step > base_interval:
+                    current_action = heuristic_action(obs, task_id, steps, max_hours)
+                    heuristic_calls += 1
 
-        # Force harvest check on last steps regardless of LLM
-        hours_left = max_hours - steps
-        weight = obs.get("avg_fish_weight", 0)
-        if hours_left <= 1 and weight > 100:
-            current_action["harvest_decision"] = True
-        elif hours_left <= 24 and weight >= 400:
-            current_action["harvest_decision"] = True
+            # Force harvest on last steps
+            hours_left = max_hours - steps
+            weight = obs.get("avg_fish_weight", 0)
+            if hours_left <= 1 and weight > 100:
+                current_action["harvest_decision"] = True
+            elif hours_left <= 24 and weight >= 400:
+                current_action["harvest_decision"] = True
 
-        # Step environment
-        step_resp = env_client.post(
-            f"{ENV_URL}/step",
-            json=current_action,
-        )
-        step_resp.raise_for_status()
-        obs = step_resp.json()
+            # Step via WebSocket
+            await ws.send(json.dumps({
+                "type": "step",
+                "data": current_action,
+            }))
+            response = json.loads(await asyncio.wait_for(ws.recv(), timeout=30))
+            if response.get("type") == "error":
+                print(f"  [Step {steps}] Step error: {response}")
+                break
+            resp_data = response.get("data", {})
+            obs = resp_data.get("observation", {})
+            is_done = resp_data.get("done", False)
 
-        reward = obs.get("reward", 0) or 0
-        total_reward += reward
-        history.append(obs)
-        steps += 1
+            reward = resp_data.get("reward", 0) or 0
+            total_reward += reward
+            history.append(obs)
+            steps += 1
 
-        # Keep history bounded to save memory
-        if len(history) > MAX_HISTORY * 2:
-            history = history[-MAX_HISTORY:]
+            if len(history) > MAX_HISTORY * 2:
+                history = history[-MAX_HISTORY:]
 
-        # Progress logging every 24 hours
-        if steps % 24 == 0:
-            print(
-                f"  Day {steps//24}: Wt={obs.get('avg_fish_weight', 0):.1f}g, "
-                f"Pop={obs.get('population', 0)}, DO={obs.get('dissolved_oxygen', 0):.1f}, "
-                f"UIA={obs.get('ammonia_toxic', 0):.4f}, "
-                f"Profit=${obs.get('current_profit', 0):.0f}, "
-                f"FCR={obs.get('fcr', 0):.2f}"
-            )
+            if steps % 24 == 0:
+                print(
+                    f"  Day {steps//24}: Wt={obs.get('avg_fish_weight', 0):.1f}g, "
+                    f"Pop={obs.get('population', 0)}, DO={obs.get('dissolved_oxygen', 0):.1f}, "
+                    f"UIA={obs.get('ammonia_toxic', 0):.4f}, "
+                    f"Profit=${obs.get('current_profit', 0):.0f}, "
+                    f"FCR={obs.get('fcr', 0):.2f}"
+                )
+
+        # Send close to cleanly end the session
+        try:
+            await ws.send(json.dumps({"type": "close"}))
+        except Exception:
+            pass
 
     elapsed = time.time() - start_time
-    final_reward = obs.get("reward", 0) or 0
+    # Final reward is the last step's reward (grader score on done)
+    final_reward = reward if reward else 0
 
     print(f"  Result: score={final_reward:.3f}, steps={steps}, "
           f"time={elapsed:.1f}s, LLM={llm_calls}, heuristic={heuristic_calls}")
@@ -626,27 +643,27 @@ def run_task(
 
 # ---- Main Entry Point ----
 
-def main():
+async def async_main():
     """Run inference on all tasks within the 20-minute budget."""
-    print("Fish Farm LLM Agent — Inference")
+    print("Fish Farm LLM Agent — Inference (WebSocket)")
     print(f"  Model: {MODEL_NAME}")
     print(f"  API: {API_BASE_URL}")
     print(f"  Env: {ENV_URL}")
 
-    client = get_llm_client()
-    env_client = httpx.Client(timeout=30.0)
+    llm_client = get_llm_client()
 
-    # Get task list
+    # Get task list via HTTP (stateless, fine for this)
+    env_client = httpx.Client(timeout=30.0)
     tasks_resp = env_client.get(f"{ENV_URL}/tasks")
     tasks_resp.raise_for_status()
     tasks = tasks_resp.json()["tasks"]
+    env_client.close()
 
     # Sort by episode length (shortest first for time budget efficiency)
     tasks.sort(key=lambda t: t["episode_hours"])
 
     # Time budget allocation: 18 minutes total (2 min buffer)
     total_budget_s = 18 * 60
-    total_episode_hours = sum(t["episode_hours"] for t in tasks)
 
     results = []
     total_start = time.time()
@@ -654,12 +671,10 @@ def main():
     for task in tasks:
         elapsed_total = time.time() - total_start
 
-        # Stop if past budget
         if elapsed_total > total_budget_s:
             print(f"\n  TIME BUDGET EXCEEDED: Skipping remaining tasks ({elapsed_total:.0f}s)")
             break
 
-        # Allocate time proportional to episode length
         remaining_budget = total_budget_s - elapsed_total
         remaining_hours = sum(
             t["episode_hours"] for t in tasks
@@ -670,8 +685,8 @@ def main():
         else:
             task_budget = remaining_budget
 
-        result = run_task(
-            client, env_client,
+        result = await run_task_ws(
+            llm_client, ENV_URL,
             task["task_id"],
             task["description"],
             task["episode_hours"],
@@ -696,7 +711,10 @@ def main():
         print(f"    {r['task_id']:25} score={r['final_reward']:.3f} "
               f"({r['elapsed_s']}s, LLM={r['llm_calls']})")
 
-    env_client.close()
+
+def main():
+    """Sync entry point — runs the async main."""
+    asyncio.run(async_main())
 
 
 if __name__ == "__main__":
