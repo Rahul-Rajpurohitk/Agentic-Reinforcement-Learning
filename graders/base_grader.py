@@ -1,4 +1,4 @@
-"""Base grader interface for the Code Review environment.
+"""Base grader interface for the Fish Farm environment.
 
 Graders produce deterministic scores in [0.0, 1.0] for each task.
 """
@@ -25,12 +25,20 @@ class BaseGrader(ABC):
     def grade(
         self,
         task_id: str,
-        ground_truth: List[Dict[str, str]],
-        agent_issues: List[Dict[str, str]],
+        final_state: Dict[str, Any],
+        episode_history: List[Dict[str, Any]],
+        task_config: Dict[str, Any],
         **kwargs,
     ) -> GradeResult:
-        """Grade a completed code review episode.
+        """Grade a completed episode.
 
-        Returns GradeResult with score in [0.0, 1.0].
+        Args:
+            task_id: Identifier for the task.
+            final_state: Final simulation state dict.
+            episode_history: List of state dicts from each hour.
+            task_config: Task configuration (weights, targets, etc).
+
+        Returns:
+            GradeResult with score in [0.0, 1.0].
         """
         ...

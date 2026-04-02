@@ -1,233 +1,328 @@
-"""Tests for the Code Review environment using official openenv-core types."""
+"""Tests for the Fish Farm environment using official openenv-core types.
 
-import sys
-import os
+Tests the FishFarmEnvironment class against the OpenEnv spec:
+  - reset(seed, episode_id, **kwargs) -> Observation
+  - step(action, timeout_s, **kwargs) -> Observation
+  - state -> State
+  - SUPPORTS_CONCURRENT_SESSIONS flag
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+Also validates simulation coupling: the cascade from
+overfeed → ammonia → DO crash → stress → disease → mortality
+must emerge from the environment's internal dynamics.
+"""
 
-from agentic_rl.models import ReviewAction, ReviewObservation, ReviewState
-from agentic_rl.server.environment import CodeReviewEnvironment
-from openenv.core.env_server import Action, Observation, State, Environment
+import pytest
+
+try:
+    from openenv.core.env_server import Action, Observation, State, Environment
+    from agentic_rl.models import FarmAction, FarmObservation, FarmState
+    from agentic_rl.server.environment import FishFarmEnvironment
+    HAS_OPENENV = True
+except ImportError:
+    HAS_OPENENV = False
 
 
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
 class TestSpecCompliance:
     """Verify the environment follows the official OpenEnv spec."""
 
     def test_models_inherit_from_openenv(self):
-        assert issubclass(ReviewAction, Action)
-        assert issubclass(ReviewObservation, Observation)
-        assert issubclass(ReviewState, State)
+        assert issubclass(FarmAction, Action)
+        assert issubclass(FarmObservation, Observation)
+        assert issubclass(FarmState, State)
 
     def test_environment_inherits_from_openenv(self):
-        assert issubclass(CodeReviewEnvironment, Environment)
+        assert issubclass(FishFarmEnvironment, Environment)
 
     def test_observation_has_done_and_reward(self):
-        obs = ReviewObservation(task_id="test")
+        obs = FarmObservation(done=False, reward=0.5)
         assert hasattr(obs, "done")
         assert hasattr(obs, "reward")
         assert hasattr(obs, "metadata")
 
     def test_state_has_episode_id_and_step_count(self):
-        state = ReviewState()
+        state = FarmState()
         assert hasattr(state, "episode_id")
         assert hasattr(state, "step_count")
 
     def test_action_has_metadata(self):
-        action = ReviewAction(issues_found=[], overall_assessment="comment")
+        action = FarmAction()
         assert hasattr(action, "metadata")
 
     def test_supports_concurrent_sessions(self):
-        assert CodeReviewEnvironment.SUPPORTS_CONCURRENT_SESSIONS is True
+        assert FishFarmEnvironment.SUPPORTS_CONCURRENT_SESSIONS is True
 
 
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
 class TestReset:
     def setup_method(self):
-        self.env = CodeReviewEnvironment()
+        self.env = FishFarmEnvironment()
 
     def test_reset_returns_observation(self):
-        obs = self.env.reset(task_id="easy_001")
-        assert isinstance(obs, ReviewObservation)
-        assert isinstance(obs, Observation)  # Official base class
+        obs = self.env.reset(task_id="feeding_basics")
+        assert isinstance(obs, FarmObservation)
+        assert isinstance(obs, Observation)
         assert obs.done is False
         assert obs.reward is None  # Initial obs has no reward per spec
-        assert obs.code_snippet != ""
-        assert obs.task_id == "easy_001"
 
-    def test_reset_sets_difficulty(self):
-        for tid, expected in [("easy_001", "easy"), ("medium_001", "medium"), ("hard_001", "hard")]:
-            obs = self.env.reset(task_id=tid)
-            assert obs.task_difficulty == expected
+    def test_reset_observation_has_fish_data(self):
+        obs = self.env.reset(task_id="feeding_basics")
+        assert obs.avg_fish_weight > 0
+        assert obs.population > 0
+        assert obs.biomass_kg > 0
+
+    def test_reset_observation_has_water_data(self):
+        obs = self.env.reset(task_id="feeding_basics")
+        assert obs.temperature > 0
+        assert obs.dissolved_oxygen > 0
+        assert 0 < obs.ph < 14
+
+    def test_reset_sets_task_initial_conditions(self):
+        obs = self.env.reset(task_id="feeding_basics")
+        assert obs.avg_fish_weight == pytest.approx(50.0, abs=1.0)
+        assert obs.population == 5000
+        assert obs.temperature == pytest.approx(30.0, abs=2.0)
 
     def test_reset_produces_clean_state(self):
-        self.env.reset(task_id="easy_001")
-        self.env.step(ReviewAction(
-            issues_found=[{"line": "1", "severity": "minor", "category": "style",
-                           "description": "test", "suggestion": "test"}],
-            overall_assessment="comment",
-        ))
-        self.env.reset(task_id="easy_002")
+        self.env.reset(task_id="feeding_basics")
+        # Step once
+        self.env.step(FarmAction(feeding_rate=0.5, aeration_rate=0.5))
+        # Reset again
+        self.env.reset(task_id="oxygen_management")
         assert self.env.state.step_count == 0
-        assert self.env.state.agent_found_issues == []
         assert self.env.state.is_complete is False
 
     def test_reset_accepts_seed_and_episode_id(self):
-        """Official spec: reset(seed, episode_id, **kwargs)."""
-        obs = self.env.reset(seed=42, episode_id="test-ep-123", task_id="easy_001")
+        obs = self.env.reset(seed=42, episode_id="test-ep-123", task_id="feeding_basics")
         assert self.env.state.episode_id == "test-ep-123"
 
     def test_reset_invalid_task_raises(self):
-        try:
-            self.env.reset(task_id="nonexistent")
-            assert False, "Should have raised ValueError"
-        except ValueError:
-            pass
+        with pytest.raises(ValueError):
+            self.env.reset(task_id="nonexistent_task_that_doesnt_exist")
+
+    def test_reset_all_12_tasks(self):
+        """Every task should reset without error."""
+        from agentic_rl.tasks import TASKS
+        for tid in TASKS:
+            obs = self.env.reset(task_id=tid)
+            assert obs.done is False
+            assert obs.population > 0
+
+    def test_reset_includes_task_description_in_feedback(self):
+        obs = self.env.reset(task_id="feeding_basics")
+        assert "TASK:" in obs.feedback
+        assert "feed" in obs.feedback.lower() or "fish" in obs.feedback.lower()
 
 
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
 class TestStep:
     def setup_method(self):
-        self.env = CodeReviewEnvironment()
+        self.env = FishFarmEnvironment()
 
-    def test_correct_review_scores_high(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(
-            issues_found=[{
-                "line": "6",
-                "severity": "critical",
-                "category": "bug",
-                "description": "ZeroDivisionError when empty list, len is zero",
-                "suggestion": "Check for empty list before division",
-            }],
-            overall_assessment="request_changes",
-        )
+    def test_step_returns_observation(self):
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction(feeding_rate=0.5, aeration_rate=0.5)
         obs = self.env.step(action)
-        assert obs.reward > 0.5
-        assert obs.done is True
+        assert isinstance(obs, FarmObservation)
+        assert obs.reward is not None
 
-    def test_wrong_review_scores_low(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(
-            issues_found=[{
-                "line": "1", "severity": "minor", "category": "style",
-                "description": "Bad name", "suggestion": "Rename",
-            }],
-            overall_assessment="comment",
-        )
+    def test_step_advances_time(self):
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction()
         obs = self.env.step(action)
-        assert obs.reward < 0.3
-
-    def test_empty_review_scores_zero(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(issues_found=[], overall_assessment="approve")
-        obs = self.env.step(action)
-        assert obs.reward == 0.0
+        assert obs.time_of_day == 1 or self.env.state.step_count == 1
 
     def test_step_counter_increments(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(issues_found=[], overall_assessment="comment")
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction()
         self.env.step(action)
         assert self.env.state.step_count == 1
         self.env.step(action)
         assert self.env.state.step_count == 2
 
     def test_max_steps_ends_episode(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(issues_found=[], overall_assessment="comment")
-        for _ in range(3):
+        """Episode should end when step_count reaches max_hours."""
+        self.env.reset(task_id="oxygen_management")  # 3 * 24 = 72 hours
+        action = FarmAction(feeding_rate=0.3, aeration_rate=0.8)
+        obs = None
+        for _ in range(72):
             obs = self.env.step(action)
+        assert obs.done is True
+
+    def test_harvest_ends_episode(self):
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction(harvest_decision=True)
+        obs = self.env.step(action)
         assert obs.done is True
 
     def test_step_accepts_timeout_s(self):
-        """Official spec: step(action, timeout_s, **kwargs)."""
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(issues_found=[], overall_assessment="comment")
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction()
         obs = self.env.step(action, timeout_s=5.0)
-        assert isinstance(obs, ReviewObservation)
+        assert isinstance(obs, FarmObservation)
 
     def test_completed_episode_returns_terminal(self):
-        self.env.reset(task_id="easy_001")
-        action = ReviewAction(issues_found=[], overall_assessment="comment")
-        for _ in range(3):
-            self.env.step(action)
-        obs = self.env.step(action)
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction(harvest_decision=True)
+        self.env.step(action)
+        # After episode done, stepping again should return terminal obs
+        obs = self.env.step(FarmAction())
         assert obs.done is True
 
-
-class TestDifficultyProgression:
-    def setup_method(self):
-        self.env = CodeReviewEnvironment()
-
-    def test_easy_has_one_obvious_issue(self):
-        self.env.reset(task_id="easy_001")
-        assert len(self.env.state.ground_truth_issues) == 1
-
-    def test_medium_has_subtle_logic_bugs(self):
-        self.env.reset(task_id="medium_001")
-        gt = self.env.state.ground_truth_issues
-        assert len(gt) >= 1
-        assert any(i.get("category") in ["bug", "logic"] for i in gt)
-
-    def test_hard_has_multiple_security_issues(self):
-        self.env.reset(task_id="hard_001")
-        gt = self.env.state.ground_truth_issues
-        assert len(gt) >= 2
-        assert "security" in [i.get("category") for i in gt]
-
-
-class TestRewardSignal:
-    def setup_method(self):
-        self.env = CodeReviewEnvironment()
-
-    def test_partial_match_gives_partial_reward(self):
-        self.env.reset(task_id="hard_001")
-        action = ReviewAction(
-            issues_found=[{
-                "line": "22", "severity": "critical", "category": "security",
-                "description": "Mass assignment - arbitrary field names allow admin escalation",
-                "suggestion": "Whitelist allowed fields",
-            }],
-            overall_assessment="request_changes",
-        )
-        obs = self.env.step(action)
-        assert 0.1 < obs.reward < 0.9
-
     def test_reward_in_valid_range(self):
-        for task_id in ["easy_001", "medium_001", "hard_001"]:
-            self.env.reset(task_id=task_id)
-            action = ReviewAction(
-                issues_found=[{
-                    "line": "1", "severity": "minor", "category": "style",
-                    "description": "random", "suggestion": "fix",
-                }],
-                overall_assessment="comment",
-            )
-            obs = self.env.step(action)
-            assert 0.0 <= obs.reward <= 1.0
+        self.env.reset(task_id="feeding_basics")
+        action = FarmAction(feeding_rate=0.5, aeration_rate=0.5)
+        obs = self.env.step(action)
+        assert -2.0 <= obs.reward <= 2.0  # rewards can be negative for penalties
+
+    def test_feeding_rate_affects_ammonia(self):
+        """Higher feeding should increase ammonia over time."""
+        # Run with high feeding
+        self.env.reset(seed=42, task_id="feeding_basics")
+        for _ in range(24):
+            obs_high = self.env.step(FarmAction(feeding_rate=1.0, aeration_rate=0.5,
+                                                 water_exchange_rate=0.0))
+        ammonia_high = obs_high.ammonia
+
+        # Run with low feeding
+        self.env.reset(seed=42, task_id="feeding_basics")
+        for _ in range(24):
+            obs_low = self.env.step(FarmAction(feeding_rate=0.0, aeration_rate=0.5,
+                                                water_exchange_rate=0.0))
+        ammonia_low = obs_low.ammonia
+
+        assert ammonia_high > ammonia_low
+
+    def test_aeration_affects_do(self):
+        """Higher aeration should maintain higher DO."""
+        self.env.reset(seed=42, task_id="oxygen_management")
+        for _ in range(12):
+            obs_high = self.env.step(FarmAction(aeration_rate=1.0))
+        do_high = obs_high.dissolved_oxygen
+
+        self.env.reset(seed=42, task_id="oxygen_management")
+        for _ in range(12):
+            obs_low = self.env.step(FarmAction(aeration_rate=0.0))
+        do_low = obs_low.dissolved_oxygen
+
+        assert do_high > do_low
 
 
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
+class TestObservationFields:
+    """Verify all observation fields are populated correctly."""
+
+    def setup_method(self):
+        self.env = FishFarmEnvironment()
+        self.env.reset(task_id="feeding_basics")
+        self.obs = self.env.step(FarmAction(feeding_rate=0.5, aeration_rate=0.5))
+
+    def test_fish_fields(self):
+        assert self.obs.avg_fish_weight > 0
+        assert self.obs.population > 0
+        assert self.obs.mortality_today >= 0
+        assert 0.0 <= self.obs.stress_level <= 1.0
+        assert self.obs.feeding_response in ("eager", "normal", "reduced", "sluggish", "refusing")
+        assert self.obs.biomass_kg > 0
+
+    def test_water_fields(self):
+        assert self.obs.temperature > 0
+        assert self.obs.dissolved_oxygen >= 0
+        assert 0 < self.obs.ph < 14
+        assert self.obs.ammonia >= 0
+        assert self.obs.ammonia_toxic >= 0
+        assert self.obs.nitrite >= 0
+        assert 0 <= self.obs.water_quality_score <= 1.0
+
+    def test_system_fields(self):
+        assert isinstance(self.obs.aerator_working, bool)
+        assert isinstance(self.obs.biofilter_working, bool)
+        assert isinstance(self.obs.heater_working, bool)
+        assert self.obs.feed_remaining_kg >= 0
+
+    def test_economics_fields(self):
+        assert self.obs.total_cost_so_far >= 0
+        assert isinstance(self.obs.current_fish_value, float)
+        assert isinstance(self.obs.current_profit, float)
+
+    def test_context_fields(self):
+        assert isinstance(self.obs.weather_forecast, str)
+        assert 0 <= self.obs.day_in_cycle
+        assert 0 <= self.obs.time_of_day < 24
+        assert isinstance(self.obs.alerts, list)
+        assert isinstance(self.obs.feedback, str)
+
+
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
+class TestCascadeDynamics:
+    """Test the core RL challenge: biological cascade emergence."""
+
+    def test_overfeed_ammonia_cascade(self):
+        """Overfeeding with no water management → ammonia rises → DO drops."""
+        env = FishFarmEnvironment()
+        env.reset(seed=42, task_id="feeding_basics")
+
+        initial_ammonia = env.step(FarmAction(feeding_rate=0.3, aeration_rate=0.5)).ammonia
+
+        # Overfeed for 48 hours with no aeration and no water exchange
+        for _ in range(47):
+            obs = env.step(FarmAction(feeding_rate=1.0, aeration_rate=0.0,
+                                      water_exchange_rate=0.0))
+
+        assert obs.ammonia > initial_ammonia * 2, "Ammonia should rise significantly with overfeeding"
+
+    def test_good_management_maintains_health(self):
+        """Moderate feeding + adequate aeration = stable conditions for 7 days."""
+        env = FishFarmEnvironment()
+        env.reset(seed=42, task_id="feeding_basics")
+
+        for _ in range(7 * 24):
+            obs = env.step(FarmAction(
+                feeding_rate=0.4, aeration_rate=0.6,
+                water_exchange_rate=0.02,
+            ))
+
+        assert obs.population > 4500, "Population should be mostly intact"
+        assert obs.avg_fish_weight > 50.0, "Fish should have grown"
+        assert obs.dissolved_oxygen > 3.0, "DO should be manageable"
+
+
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
 class TestSerializability:
     """Verify all models serialize to/from JSON (required for WebSocket)."""
 
     def test_action_round_trip(self):
-        action = ReviewAction(
-            issues_found=[{"line": "1", "severity": "critical", "category": "bug",
-                           "description": "test", "suggestion": "fix"}],
-            overall_assessment="request_changes",
+        action = FarmAction(
+            feeding_rate=0.6, aeration_rate=0.8,
+            heater_setting=-0.3, water_exchange_rate=0.05,
+            harvest_decision=False, treatment="antibiotics",
         )
         data = action.model_dump()
-        restored = ReviewAction(**data)
-        assert restored.issues_found == action.issues_found
+        restored = FarmAction(**data)
+        assert restored.feeding_rate == action.feeding_rate
+        assert restored.treatment == action.treatment
 
     def test_observation_round_trip(self):
-        env = CodeReviewEnvironment()
-        obs = env.reset(task_id="easy_001")
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
         data = obs.model_dump()
-        restored = ReviewObservation(**data)
-        assert restored.task_id == obs.task_id
+        restored = FarmObservation(**data)
+        assert restored.avg_fish_weight == obs.avg_fish_weight
         assert restored.done == obs.done
 
     def test_state_round_trip(self):
-        env = CodeReviewEnvironment()
-        env.reset(task_id="easy_001")
+        env = FishFarmEnvironment()
+        env.reset(task_id="feeding_basics")
         data = env.state.model_dump()
-        restored = ReviewState(**data)
+        restored = FarmState(**data)
         assert restored.task_id == env.state.task_id
+
+    def test_action_schema_complete(self):
+        schema = FarmAction.model_json_schema()
+        expected_fields = {"feeding_rate", "aeration_rate", "heater_setting",
+                          "water_exchange_rate", "harvest_decision", "treatment"}
+        assert expected_fields.issubset(set(schema["properties"].keys()))
+        # Every field should have a description
+        for field_name in expected_fields:
+            assert "description" in schema["properties"][field_name], \
+                f"Field {field_name} missing description"

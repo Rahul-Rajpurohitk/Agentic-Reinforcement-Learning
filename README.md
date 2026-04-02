@@ -1,165 +1,154 @@
-# Code Review Agent Environment
+# Fish Farm RL Environment
 
-**An OpenEnv-compatible RL environment for training AI agents to review code**
+**The world's first OpenEnv-compatible aquaculture farming environment**
 
-A real-world reinforcement learning environment where AI agents learn to identify bugs, logic errors, and security vulnerabilities in code. Built for the [Meta PyTorch OpenEnv Hackathon](https://www.scaler.com/school-of-technology/meta-pytorch-hackathon/) x Scaler School of Technology.
+An AI agent manages a Nile Tilapia Recirculating Aquaculture System (RAS) — making hourly decisions about feeding, aeration, temperature control, water exchange, disease treatment, and harvest timing. Built on real aquaculture science: bioenergetic growth models, coupled DO/ammonia/pH dynamics, SEIR disease epidemiology, and realistic economic trade-offs.
 
-## Why Code Review?
+Built for the [Meta PyTorch OpenEnv Hackathon](https://www.scaler.com/school-of-technology/meta-pytorch-hackathon/) x Scaler School of Technology.
 
-Code review is one of the most common tasks in software engineering — every PR needs review, yet it's time-consuming and inconsistent. Training agents to review code has immediate, practical value:
+## Why Aquaculture?
 
-- Catches bugs before they reach production
-- Identifies security vulnerabilities early
-- Scales across codebases without reviewer fatigue
-- Provides consistent, reproducible assessments
-
-This environment lets you train and evaluate agents on realistic code review tasks with clear, measurable outcomes.
-
----
-
-## Environment Description
-
-The agent receives a Python code snippet and must identify all issues — bugs, logic errors, security vulnerabilities, and style problems. Each issue must be reported with a line number, severity, category, description, and fix suggestion.
-
-### Action Space
-
-The agent sends a `ReviewAction`:
-
-```python
-{
-    "issues_found": [
-        {
-            "line": "6",                    # Line number of the issue
-            "severity": "critical",          # critical | major | minor
-            "category": "bug",               # bug | security | style | performance | logic
-            "description": "ZeroDivisionError when list is empty",
-            "suggestion": "Check for empty list before division"
-        }
-    ],
-    "overall_assessment": "request_changes",  # approve | request_changes | comment
-    "confidence": 0.9                         # 0.0 - 1.0
-}
-```
-
-### Observation Space
-
-The environment returns a `ReviewObservation`:
-
-```python
-{
-    "task_id": "easy_001",
-    "task_difficulty": "easy",
-    "code_snippet": "def calculate_average(numbers):\n    ...",
-    "language": "python",
-    "context": "A utility function to calculate the average of a list",
-    "feedback": "Found 1/1 issues. Excellent!",
-    "reward": 0.85,          # Partial progress signal [0.0 - 1.0]
-    "done": true,            # Episode complete flag
-    "info": { ... }          # Grading details
-}
-```
-
-### Reward Function
-
-The reward provides **meaningful partial progress signals** over the full trajectory:
-
-- **Keyword matching** (70%): How well found issues match ground-truth issue descriptions
-- **Line proximity** (20%): How close the reported line is to the actual issue
-- **Severity accuracy** (10%): Whether the severity classification is correct
-- **Noise penalty**: False positives are gently penalized (-0.03 each, max -0.15)
-
-This shaped reward encourages agents to find all real issues while avoiding false alarms.
+Aquaculture is a **$300B global industry** producing 50%+ of the world's fish. Yet:
+- **No Gymnasium/OpenEnv-compatible aquaculture environment exists** — this is the #1 identified gap in aquaculture AI research
+- Real farms lose **$10B+ annually** to preventable die-offs from water quality failures, disease outbreaks, and suboptimal feeding
+- The biological cascade (overfeed → ammonia → DO crash → stress → disease → mass mortality) creates a naturally rich RL problem with **13 coupled state variables**
+- Q-learning already achieved **79% less feed and zero mortality** vs traditional control (Chahid et al. 2021) — proving RL has massive real-world impact here
 
 ---
 
-## Tasks
+## The Biological Cascade
 
-9 tasks across 3 difficulty levels. Each task has deterministic graders scoring 0.0–1.0.
+The core challenge: **everything is connected.**
 
-### Easy (3 tasks)
+```
+Overfeeding ──→ Ammonia ↑ ──→ DO ↓ ──→ Fish Stress ↑ ──→ Disease ──→ Mass Mortality
+     ↑              ↑           ↓           ↓               ↓              ↓
+  Feed Cost      pH shift    Growth ↓   Feeding ↓       Treatment $    Revenue = 0
+```
 
-| Task ID | Description | Issues | Expected Score |
-|---------|-------------|--------|----------------|
-| `easy_001` | ZeroDivisionError in average function | 1 bug | ~0.85+ |
-| `easy_002` | Negative number handling in find_max | 1 logic | ~0.85+ |
-| `easy_003` | File handle resource leak | 1 bug | ~0.85+ |
+An agent that feeds aggressively grows fish faster but risks catastrophic ammonia spikes. An agent that plays it safe grows slowly and loses money. The optimal policy requires **balancing 6 continuous controls across 13 coupled state variables** — a challenge that scales from easy single-concern tasks to extreme multi-crisis scenarios.
 
-### Medium (3 tasks)
+---
 
-| Task ID | Description | Issues | Expected Score |
-|---------|-------------|--------|----------------|
-| `medium_001` | Integer vs float division in binary search | 1 bug | ~0.70+ |
-| `medium_002` | Missing set.add() in deduplication | 1 logic | ~0.70+ |
-| `medium_003` | Cache key ignores kwargs in memoize | 1 logic | ~0.60+ |
+## Environment Design
 
-### Hard (3 tasks)
+### Action Space (6 continuous controls)
 
-| Task ID | Description | Issues | Expected Score |
-|---------|-------------|--------|----------------|
-| `hard_001` | Mass assignment + path traversal in REST API | 2 security | ~0.40+ |
-| `hard_002` | Weak crypto + token issues in auth system | 4 security | ~0.30+ |
-| `hard_003` | Command injection + pickle deserialization in pipeline | 3 security | ~0.35+ |
+```json
+{
+  "feeding_rate": 0.0-1.0,       // Feed intensity (growth vs ammonia trade-off)
+  "aeration_rate": 0.0-1.0,      // Oxygen injection (DO vs electricity cost)
+  "heater_setting": -1.0-1.0,    // Temperature control (growth vs energy)
+  "water_exchange_rate": 0.0-0.1, // Fresh water (dilution vs water cost)
+  "harvest_decision": true/false,  // Harvest all fish (ends episode)
+  "treatment": "none/antibiotics"  // Disease treatment (recovery vs cost)
+}
+```
 
-**Hard tasks genuinely challenge frontier models** — finding all subtle security vulnerabilities requires deep understanding of web security, cryptography, and attack vectors.
+### Observation Space (partial observability)
+
+The agent sees sensor readings (temperature, DO, pH, ammonia, nitrite), fish status (weight, population, mortality, feeding behavior, stress), economics (costs, fish value, profit), weather, equipment status, and alerts. **Disease infection count is hidden** — the agent must infer disease from behavioral indicators.
+
+### State Variables (13 coupled)
+
+| Variable | Source | Coupling |
+|----------|--------|----------|
+| Fish weight | Bioenergetic ODE | Temperature, DO, UIA, feeding |
+| Population | Mortality model | Stress, acute lethal events |
+| DO | Mass balance ODE | Fish respiration, aeration, temperature, nitrification |
+| TAN | Mass balance ODE | Feeding, biofilter, water exchange |
+| UIA | Chemical equilibrium | TAN, pH, temperature |
+| pH | Alkalinity buffer | Nitrification acid production |
+| NO2 | Nitrification intermediate | Biofilter capacity |
+| Temperature | Thermal model | Air temp, heater, volume |
+| Stress | Weighted composite | DO, UIA, temperature, density |
+| Disease (SEIR) | Compartmental model | Stress triggers, treatment |
+| Feed inventory | Logistics | Consumption, deliveries |
+| Costs | Accounting | All actions have costs |
+| Weather | Stochastic | Diel cycle, seasons, storms |
+
+### Key Equations
+
+**Growth** (bioenergetic, from KAUST/FAO research):
+```
+dW/dt = [h·π·f·b·(1-a)·τ(T)·σ(DO)·v(UIA)] × W^0.6277 - [k_min·e^(s·(T-T_min))] × W^0.8373
+```
+
+**DO mass balance** (10 sub-steps/hour for stability):
+```
+dDO/dt = P_photo - FR·biomass/V - 4.57·K_NR·TAN - DO_water + K_a·(DO_sat-DO) + A_mech + Q_ex·(DO_in-DO)
+```
+
+**Ammonia toxicity**:
+```
+UIA = TAN / (1 + 10^(pKa - pH)),  pKa = 0.09018 + 2729.92/(T + 273.15)
+```
+
+---
+
+## 12 Tasks (Easy → Extreme)
+
+### Easy (3 tasks) — Learn one control
+| Task | Hours | Challenge |
+|------|-------|-----------|
+| `feeding_basics` | 168 | Feed fish to 55g+ with FCR < 2.0, zero deaths |
+| `oxygen_management` | 72 | Keep DO > 5.0 during hot weather (35°C air) |
+| `water_quality_balance` | 168 | Maintain all water parameters simultaneously |
+
+### Medium (4 tasks) — Multi-concern + events
+| Task | Hours | Challenge |
+|------|-------|-----------|
+| `temperature_stress` | 120 | Survive a 3-day heat wave (38°C) |
+| `ammonia_crisis` | 72 | Biofilter failure — manage rising ammonia |
+| `disease_outbreak` | 240 | Detect and treat disease before 10% mortality |
+| `growth_optimization` | 336 | Maximize growth while maintaining water quality |
+
+### Hard (3 tasks) — Full lifecycle + compound events
+| Task | Hours | Challenge |
+|------|-------|-----------|
+| `full_growout` | 1440 | 60-day grow-out: 20g → 400g market weight |
+| `storm_response` | 120 | Severe storm + 12h power outage + biofilter recovery |
+| `multi_objective` | 720 | Pareto-optimize profit × welfare × environment |
+
+### Extreme (2 tasks) — Frontier-model difficulty
+| Task | Hours | Challenge |
+|------|-------|-----------|
+| `catastrophe_prevention` | 336 | 5 compound crises in 14 days (algae bloom → aerator failure → disease → market crash → feed shortage) |
+| `season_management` | 2160 | Full 90-day season with random events, ROI optimization |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.10+
-- Docker (for containerized deployment)
-
 ### Setup
 
 ```bash
-# Clone and install
 git clone https://github.com/Rahul-Rajpurohitk/Agentic-Reinforcement-Learning.git
 cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
-
-# Run the environment server
-uvicorn src.agentic_rl.server.app:app --reload --port 8000
+pip install -e .
 
 # Run tests
-pytest tests/ -v
+pytest tests/test_simulator.py tests/test_tasks_grader.py -v
 
-# Run baseline inference (requires OPENAI_API_KEY)
-export OPENAI_API_KEY=your_key_here
-python baseline_inference.py
+# Start environment server
+uvicorn src.agentic_rl.server.app:app --port 8000
 ```
 
 ### Docker
 
 ```bash
-docker build -t code-review-env .
-docker run -p 8000:8000 code-review-env
+docker build -t fish-farm-env .
+docker run -p 8000:8000 fish-farm-env
 ```
 
-### Interact with the Environment
+### Run Inference
 
-```python
-from src.agentic_rl.client import CodeReviewClient
-
-client = CodeReviewClient(base_url="http://localhost:8000")
-
-# Start a review
-obs = client.reset(task_id="easy_001")
-print(obs.code_snippet)
-
-# Submit review
-obs = client.step(
-    issues_found=[{
-        "line": "6",
-        "severity": "critical",
-        "category": "bug",
-        "description": "ZeroDivisionError on empty list",
-        "suggestion": "Check length before dividing",
-    }],
-    overall_assessment="request_changes",
-)
-print(f"Score: {obs.reward}, Feedback: {obs.feedback}")
+```bash
+export API_BASE_URL=https://api.openai.com/v1
+export MODEL_NAME=gpt-4o
+export OPENAI_API_KEY=your_key
+python inference.py
 ```
 
 ---
@@ -168,60 +157,64 @@ print(f"Score: {obs.reward}, Feedback: {obs.feedback}")
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Health check (returns 200) |
-| `/tasks` | GET | List all tasks with difficulty levels |
-| `/reset` | POST | Start new episode `{"task_id": "easy_001"}` |
-| `/step` | POST | Submit review action |
+| `/health` | GET | Health check |
+| `/tasks` | GET | List all 12 tasks with action schema |
+| `/reset` | POST | Start episode `{"task_id": "feeding_basics"}` |
+| `/step` | POST | Submit action, get observation |
 | `/state` | GET | Internal state (ground truth for grading) |
-| `/docs` | GET | Interactive Swagger API docs |
+| `/grader` | POST | Grade a completed episode |
+| `/baseline` | POST | Run constant-action baseline |
+| `/docs` | GET | Interactive Swagger docs |
 
 ---
 
 ## Project Structure
 
 ```
-├── openenv.yaml              # OpenEnv spec manifest
-├── Dockerfile                # Container spec (docker build + run)
-├── requirements.txt          # Python dependencies
-├── baseline_inference.py     # Baseline script using OpenAI API
+├── openenv.yaml              # OpenEnv spec (spec_version: 1, type: space)
+├── inference.py              # LLM agent (< 20 min on 2 vCPU/8GB)
+├── Dockerfile                # Container spec
+├── requirements.txt
 ├── src/agentic_rl/
-│   ├── models.py             # Typed Pydantic models (Action, Observation, State)
-│   ├── tasks.py              # 9 task definitions with ground truth
-│   ├── client.py             # HTTP client
+│   ├── constants.py          # All biological/physical/economic constants
+│   ├── models.py             # FarmAction, FarmObservation, FarmState
+│   ├── tasks.py              # 12 task scenarios
+│   ├── engine/
+│   │   ├── water_quality.py  # DO, TAN, UIA, pH, temperature dynamics
+│   │   ├── fish_biology.py   # Bioenergetic growth, stress, mortality
+│   │   ├── disease.py        # SEIR epidemic model
+│   │   ├── economics.py      # Feed cost, operating cost, profit
+│   │   ├── weather.py        # Diel cycle, seasons, storms
+│   │   ├── events.py         # Event scheduler (equipment, disease, storms)
+│   │   └── simulator.py      # Orchestrator (ties all subsystems together)
 │   └── server/
-│       ├── environment.py    # Core logic: reset(), step(), state
+│       ├── environment.py    # FishFarmEnvironment (OpenEnv interface)
 │       └── app.py            # FastAPI server
-├── rewards/                  # Reward function library
-├── graders/                  # Deterministic graders (0.0-1.0)
-├── training/                 # GRPO training template
-└── tests/                    # Test suite
+├── graders/
+│   ├── base_grader.py        # BaseGrader + GradeResult
+│   └── farm_graders.py       # 12 task-specific graders with partial credit
+├── tests/
+│   ├── test_water_quality.py # 12 tests
+│   ├── test_fish_biology.py  # 13 tests
+│   ├── test_simulator.py     # 9 integration tests
+│   └── test_tasks_grader.py  # 10 tests
+└── docs/
+    └── knowledge-base/       # 4,400+ lines of aquaculture research
 ```
 
 ---
 
-## Baseline Scores
+## Research Foundation
 
-Scores from `baseline_inference.py` using GPT-4o-mini (temperature=0.0):
-
-| Difficulty | Avg Score | Tasks |
-|-----------|-----------|-------|
-| Easy | ~0.80 | 3 |
-| Medium | ~0.60 | 3 |
-| Hard | ~0.35 | 3 |
-| **Overall** | **~0.58** | **9** |
-
-*(Run `python baseline_inference.py` to reproduce)*
+Built on 4,400+ lines of research across 40+ citations:
+- **Growth model**: FAO bioenergetic equations for Nile Tilapia (Oreochromis niloticus)
+- **Water chemistry**: DO mass balance, ammonia equilibrium (Emerson et al. 1975)
+- **Disease**: SEIR compartmental model with environmental triggers
+- **Economics**: Real industry cost structures (feed = 50-70% of OpEx)
+- **RL baseline**: Chahid et al. 2021 (Q-learning: 79% feed reduction, zero mortality)
 
 ---
 
-## Tech Stack
-
-- **OpenEnv** — Meta's RL environment framework
-- **FastAPI** — Server framework with auto-generated docs
-- **Pydantic** — Type-safe data models
-- **TRL** — Transformer RL (GRPO training)
-- **PyTorch** — Deep learning backend
-
 ## Author
 
-**Rahul Rajpurohit** — rahulrajpurohit2024@gmail.com
+**Rahul Rajpurohit** — Solo entry, Meta PyTorch OpenEnv Hackathon 2026

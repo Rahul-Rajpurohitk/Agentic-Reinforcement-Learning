@@ -1,4 +1,4 @@
 from .base_grader import BaseGrader, GradeResult
-from .example_graders import KeywordMatchGrader, StrictGrader
+from .farm_graders import FarmGrader
 
-__all__ = ["BaseGrader", "GradeResult", "KeywordMatchGrader", "StrictGrader"]
+__all__ = ["BaseGrader", "GradeResult", "FarmGrader"]

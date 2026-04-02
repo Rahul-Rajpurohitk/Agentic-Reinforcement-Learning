@@ -1,471 +1,323 @@
-"""Task definitions for the Code Review environment.
+"""12 task scenarios for the Fish Farm environment.
 
-Each task has:
-- A code snippet with known bugs/issues
-- Ground truth issues with severity, category, line numbers
-- A difficulty level (easy, medium, hard)
-- A deterministic grader that scores 0.0-1.0
+Easy (3):    Single-concern, short episodes, forgiving thresholds
+Medium (4):  Multi-concern, events, cascading risks
+Hard (3):    Full lifecycle, compound events, multi-objective optimization
+Extreme (2): Everything at once, frontier-model difficulty
 
-Tasks progress: easy -> medium -> hard
-- Easy: obvious syntax/style issues
-- Medium: logic bugs that produce wrong results
-- Hard: subtle security vulnerabilities that challenge frontier models
+Each task dict contains:
+- initial_conditions: starting state overrides
+- events: scheduled Event objects
+- episode_hours: max episode length
+- reward_weights: per-component weights for reward calculation
+- grader: name of grading function
+- description: natural language task briefing for the agent
+- difficulty: easy/medium/hard/extreme
 """
 
 from typing import Any, Dict, List
+from .engine.events import Event
 
 
-TASKS: Dict[str, Dict[str, Any]] = {
-    # =========================================================================
-    # EASY: Obvious bugs a junior developer would catch
-    # =========================================================================
-    "easy_001": {
-        "difficulty": "easy",
-        "language": "python",
-        "context": "A utility function to calculate the average of a list of numbers.",
-        "code": '''def calculate_average(numbers):
-    """Calculate the average of a list of numbers."""
-    total = 0
-    for num in numbers:
-        total += num
-    average = total / len(numbers)
-    return average
+def _make_tasks() -> Dict[str, Dict[str, Any]]:
+    return {
+        # =====================================================================
+        # EASY TASKS — Single concern, learn one control at a time
+        # =====================================================================
 
-result = calculate_average([])
-print(f"Average: {result}")
-''',
-        "ground_truth": [
-            {
-                "line": "6",
-                "severity": "critical",
-                "category": "bug",
-                "description": "ZeroDivisionError when input list is empty. "
-                "len(numbers) is 0 for empty lists.",
-                "keywords": ["zero", "division", "empty", "len"],
+        "feeding_basics": {
+            "difficulty": "easy",
+            "episode_hours": 7 * 24,
+            "description": (
+                "You manage a healthy tilapia tank for 7 days. Your goal: feed the fish "
+                "to achieve steady growth without overfeeding. Fish start at 50g, target 55g+. "
+                "Keep FCR below 2.0. Zero fish should die from starvation or overfeeding."
+            ),
+            "initial_conditions": {
+                "weight_g": 50.0, "population": 5000, "temp": 30.0,
+                "DO": 7.0, "TAN": 0.1, "pH": 7.5, "day_of_year": 90,
             },
-        ],
-    },
-    "easy_002": {
-        "difficulty": "easy",
-        "language": "python",
-        "context": "A function to find the maximum value in a list.",
-        "code": '''def find_maximum(values):
-    """Find the maximum value in a list."""
-    max_val = 0
-    for val in values:
-        if val > max_val:
-            max_val = val
-    return max_val
+            "events": [],
+            "reward_weights": {"growth": 0.5, "fcr": 0.3, "survival": 0.2},
+            "grader": "feeding_grader",
+            "target_weight": 55.0,
+        },
 
-print(find_maximum([-5, -3, -1, -8]))
-''',
-        "ground_truth": [
-            {
-                "line": "3",
-                "severity": "major",
-                "category": "logic",
-                "description": "Initializing max_val to 0 fails for all-negative lists. "
-                "Should initialize to float('-inf') or values[0].",
-                "keywords": ["initial", "negative", "zero", "0", "float", "inf"],
+        "oxygen_management": {
+            "difficulty": "easy",
+            "episode_hours": 3 * 24,
+            "description": (
+                "It's a hot week (air temp 35C). Dissolved oxygen is dropping. "
+                "Your job: keep DO above 5.0 mg/L at all times using the aerator. "
+                "Fish are already stocked at moderate density. Score based on "
+                "minimum DO maintained and time spent in safe zone."
+            ),
+            "initial_conditions": {
+                "weight_g": 100.0, "population": 4000, "temp": 32.0,
+                "DO": 6.0, "TAN": 0.3, "pH": 7.5, "day_of_year": 180,
+                "base_air_temp": 35.0,
             },
-        ],
-    },
-    "easy_003": {
-        "difficulty": "easy",
-        "language": "python",
-        "context": "Reading user data from a config file.",
-        "code": '''import json
+            "events": [],
+            "reward_weights": {"do_stability": 0.7, "efficiency": 0.3},
+            "grader": "oxygen_grader",
+        },
 
-def load_config(filepath):
-    """Load configuration from a JSON file."""
-    f = open(filepath, 'r')
-    config = json.load(f)
-    return config
-
-settings = load_config("config.json")
-print(settings)
-''',
-        "ground_truth": [
-            {
-                "line": "5",
-                "severity": "major",
-                "category": "bug",
-                "description": "File handle is never closed. Should use 'with' statement "
-                "or call f.close() to prevent resource leaks.",
-                "keywords": ["close", "with", "resource", "leak", "file", "handle"],
+        "water_quality_balance": {
+            "difficulty": "easy",
+            "episode_hours": 7 * 24,
+            "description": (
+                "Manage all water quality parameters simultaneously: keep DO > 5, "
+                "ammonia (UIA) < 0.05, pH 6.5-8.5, temperature 27-32C. "
+                "You have full control: feeding, aeration, heater, water exchange. "
+                "Score = time-averaged water quality composite score."
+            ),
+            "initial_conditions": {
+                "weight_g": 80.0, "population": 5000, "temp": 29.0,
+                "DO": 7.0, "TAN": 0.2, "pH": 7.5, "day_of_year": 100,
             },
-        ],
-    },
-    # =========================================================================
-    # MEDIUM: Logic bugs that produce subtly wrong results
-    # =========================================================================
-    "medium_001": {
-        "difficulty": "medium",
-        "language": "python",
-        "context": "A binary search implementation for a sorted list.",
-        "code": '''def binary_search(arr, target):
-    """Search for target in sorted array. Return index or -1."""
-    left, right = 0, len(arr) - 1
+            "events": [],
+            "reward_weights": {"water_quality": 0.8, "efficiency": 0.2},
+            "grader": "water_quality_grader",
+        },
 
-    while left <= right:
-        mid = (left + right) / 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
+        # =====================================================================
+        # MEDIUM TASKS — Multi-concern, events, cascading risks
+        # =====================================================================
 
-    return -1
-
-idx = binary_search([1, 3, 5, 7, 9, 11], 7)
-print(f"Found at index: {idx}")
-''',
-        "ground_truth": [
-            {
-                "line": "6",
-                "severity": "critical",
-                "category": "bug",
-                "description": "Using / instead of // for integer division. "
-                "mid will be a float, causing TypeError when used as list index.",
-                "keywords": ["integer", "division", "//", "float", "index", "floor"],
+        "temperature_stress": {
+            "difficulty": "medium",
+            "episode_hours": 5 * 24,
+            "description": (
+                "ALERT: A heat wave is hitting. Air temperature will reach 38C for "
+                "3 days starting hour 24. You must manage water temperature using "
+                "heater (cooling mode), reduce feeding (fish eat less in heat), and "
+                "increase aeration (warm water holds less oxygen). "
+                "Goal: Keep fish alive and growing through the crisis."
+            ),
+            "initial_conditions": {
+                "weight_g": 120.0, "population": 8000, "temp": 30.0,
+                "DO": 7.0, "TAN": 0.2, "pH": 7.5, "day_of_year": 200,
+                "base_air_temp": 33.0,
             },
-        ],
-    },
-    "medium_002": {
-        "difficulty": "medium",
-        "language": "python",
-        "context": "A function that removes duplicates while preserving order.",
-        "code": '''def remove_duplicates(items):
-    """Remove duplicates from list while preserving order."""
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            result.append(item)
-    return result
+            "events": [
+                Event(type="heat_wave", trigger_hour=24, severity=0.7,
+                      duration_hours=72, description="HEAT WAVE: Air temp reaching 38C"),
+            ],
+            "reward_weights": {"survival": 0.4, "growth": 0.3, "water_quality": 0.3},
+            "grader": "stress_survival_grader",
+        },
 
-data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3]
-print(remove_duplicates(data))
-''',
-        "ground_truth": [
-            {
-                "line": "7",
-                "severity": "major",
-                "category": "logic",
-                "description": "Items are never added to the 'seen' set after appending. "
-                "Need 'seen.add(item)' after append, otherwise no duplicates are removed.",
-                "keywords": ["seen", "add", "set", "never", "added", "missing"],
+        "ammonia_crisis": {
+            "difficulty": "medium",
+            "episode_hours": 3 * 24,
+            "description": (
+                "EMERGENCY: The biofilter has partially failed (50% capacity). "
+                "Ammonia is rising. You must: reduce feeding immediately, increase "
+                "water exchange, maintain aeration. Goal: prevent ammonia (UIA) from "
+                "reaching lethal levels (>0.6 mg/L) while keeping fish alive."
+            ),
+            "initial_conditions": {
+                "weight_g": 150.0, "population": 7000, "temp": 30.0,
+                "DO": 6.5, "TAN": 1.5, "pH": 7.8, "day_of_year": 150,
             },
-        ],
-    },
-    "medium_003": {
-        "difficulty": "medium",
-        "language": "python",
-        "context": "A caching decorator for expensive function calls.",
-        "code": '''def memoize(func):
-    """Cache function results for repeated calls."""
-    cache = {}
+            "events": [
+                Event(type="equipment_failure", trigger_hour=0, severity=0.5,
+                      duration_hours=48, description="BIOFILTER FAILURE: 50% capacity",
+                      equipment="biofilter"),
+            ],
+            "reward_weights": {"ammonia_control": 0.4, "survival": 0.4, "efficiency": 0.2},
+            "grader": "ammonia_crisis_grader",
+        },
 
-    def wrapper(*args, **kwargs):
-        key = args
-        if key in cache:
-            return cache[key]
-        result = func(*args, **kwargs)
-        cache[key] = result
-        return result
-
-    return wrapper
-
-@memoize
-def fetch_user(user_id, include_deleted=False):
-    """Fetch user from database (expensive operation)."""
-    print(f"Fetching user {user_id}, include_deleted={include_deleted}")
-    return {"id": user_id, "deleted": include_deleted}
-
-# These should return different results but won't
-print(fetch_user(1, include_deleted=False))
-print(fetch_user(1, include_deleted=True))
-''',
-        "ground_truth": [
-            {
-                "line": "5",
-                "severity": "major",
-                "category": "logic",
-                "description": "Cache key only uses positional args, ignoring kwargs. "
-                "Calls with same positional args but different kwargs "
-                "return cached (wrong) result. Key should include kwargs.",
-                "keywords": ["kwargs", "keyword", "cache", "key", "ignore", "missing"],
+        "disease_outbreak": {
+            "difficulty": "medium",
+            "episode_hours": 10 * 24,
+            "description": (
+                "Fish are showing signs of stress — sluggish feeding, elevated mortality. "
+                "A disease may be developing. Watch for: increasing mortality, "
+                "feeding refusal, and behavioral changes. If you detect disease, "
+                "apply treatment ('antibiotics'). Also manage water quality to "
+                "reduce stress. Goal: contain the outbreak with <10% total mortality."
+            ),
+            "initial_conditions": {
+                "weight_g": 200.0, "population": 6000, "temp": 31.0,
+                "DO": 6.0, "TAN": 0.5, "pH": 7.6, "day_of_year": 120,
             },
-        ],
-    },
-    # =========================================================================
-    # HARD: Subtle security vulnerabilities that challenge frontier models
-    # =========================================================================
-    "hard_001": {
-        "difficulty": "hard",
-        "language": "python",
-        "context": "A REST API endpoint that handles user profile updates.",
-        "code": '''from flask import Flask, request, jsonify
-import sqlite3
-import os
+            "events": [
+                Event(type="disease", trigger_hour=12, severity=0.4,
+                      duration_hours=0, description="Disease pathogen introduced"),
+            ],
+            "reward_weights": {"survival": 0.4, "treatment_timing": 0.3, "water_quality": 0.3},
+            "grader": "disease_grader",
+        },
 
-app = Flask(__name__)
-DB_PATH = "users.db"
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    return conn
-
-@app.route("/api/user/<user_id>/update", methods=["POST"])
-def update_profile(user_id):
-    """Update user profile fields."""
-    data = request.get_json()
-    conn = get_db()
-    cursor = conn.cursor()
-
-    updates = []
-    values = []
-    for field, value in data.items():
-        updates.append(f"{field} = ?")
-        values.append(value)
-
-    values.append(user_id)
-    query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
-    cursor.execute(query, values)
-    conn.commit()
-    conn.close()
-
-    return jsonify({"status": "updated"})
-
-@app.route("/api/user/<user_id>/avatar", methods=["POST"])
-def upload_avatar(user_id):
-    """Upload user avatar image."""
-    file = request.files.get("avatar")
-    if file:
-        filename = file.filename
-        filepath = os.path.join("uploads", "avatars", filename)
-        file.save(filepath)
-        return jsonify({"status": "uploaded", "path": filepath})
-    return jsonify({"error": "no file"}), 400
-''',
-        "ground_truth": [
-            {
-                "line": "22",
-                "severity": "critical",
-                "category": "security",
-                "description": "Mass assignment vulnerability. User-controlled field names "
-                "are used directly in SQL column names. An attacker can update "
-                "any column (e.g., 'is_admin', 'role', 'password_hash') by "
-                "sending arbitrary keys in the JSON body. Must whitelist allowed fields.",
-                "keywords": ["mass assign", "whitelist", "field", "column", "arbitrary", "admin"],
+        "growth_optimization": {
+            "difficulty": "medium",
+            "episode_hours": 14 * 24,
+            "description": (
+                "Optimize fish growth over 2 weeks. Fish start at 80g, target 120g+. "
+                "Balance aggressive feeding (faster growth) against water quality "
+                "degradation (ammonia, DO). Achieve the best FCR possible while "
+                "maximizing weight gain. Minimize mortality."
+            ),
+            "initial_conditions": {
+                "weight_g": 80.0, "population": 6000, "temp": 30.0,
+                "DO": 7.0, "TAN": 0.1, "pH": 7.5, "day_of_year": 90,
             },
-            {
-                "line": "37",
-                "severity": "critical",
-                "category": "security",
-                "description": "Path traversal vulnerability. User-controlled filename is "
-                "used directly in file path. Attacker can upload files anywhere "
-                "on the filesystem using '../' in filename (e.g., "
-                "'../../etc/cron.d/backdoor'). Must sanitize filename with "
-                "secure_filename() or similar.",
-                "keywords": ["path traversal", "filename", "directory", "sanitize", "secure_filename", "../"],
+            "events": [],
+            "reward_weights": {"growth": 0.4, "fcr": 0.3, "survival": 0.2, "water_quality": 0.1},
+            "grader": "growth_optimization_grader",
+            "target_weight": 120.0,
+        },
+
+        # =====================================================================
+        # HARD TASKS — Full lifecycle, compound events, multi-objective
+        # =====================================================================
+
+        "full_growout": {
+            "difficulty": "hard",
+            "episode_hours": 60 * 24,
+            "description": (
+                "Complete grow-out cycle: take fish from 20g fingerlings to market "
+                "weight (400g+). Manage all systems over 60 days. Random weather, "
+                "possible disease, possible equipment issues. Score on: final weight, "
+                "survival rate, FCR, and profit. Decide when to harvest for max value."
+            ),
+            "initial_conditions": {
+                "weight_g": 20.0, "population": 7000, "temp": 28.0,
+                "DO": 7.5, "TAN": 0.05, "pH": 7.5, "day_of_year": 60,
             },
-        ],
-    },
-    "hard_002": {
-        "difficulty": "hard",
-        "language": "python",
-        "context": "An authentication system with password reset functionality.",
-        "code": '''import hashlib
-import time
-import secrets
+            "events": [],
+            "reward_weights": {"profit": 0.3, "growth": 0.25, "survival": 0.25, "fcr": 0.1, "water_quality": 0.1},
+            "grader": "full_growout_grader",
+            "target_weight": 400.0,
+        },
 
-RESET_TOKENS = {}
-USERS = {}
+        "storm_response": {
+            "difficulty": "hard",
+            "episode_hours": 5 * 24,
+            "description": (
+                "SEVERE STORM WARNING: A major storm hits at hour 24. Effects: "
+                "temperature drops 8C, power outage for 12 hours (aerators, heater, "
+                "biofilter ALL down), high winds. After power returns, biofilter "
+                "needs 24 hours to recover. Your job: maximize survival through the crisis. "
+                "Pre-position your systems before the storm hits."
+            ),
+            "initial_conditions": {
+                "weight_g": 200.0, "population": 8000, "temp": 30.0,
+                "DO": 7.5, "TAN": 0.2, "pH": 7.5, "day_of_year": 180,
+            },
+            "events": [
+                Event(type="storm", trigger_hour=24, severity=0.9,
+                      duration_hours=48, description="SEVERE STORM: Temp -8C, high winds"),
+                Event(type="power_outage", trigger_hour=24, severity=1.0,
+                      duration_hours=12, description="POWER OUTAGE: All equipment offline"),
+                Event(type="equipment_failure", trigger_hour=36, severity=0.7,
+                      duration_hours=24, description="BIOFILTER RECOVERY: Reduced capacity post-storm",
+                      equipment="biofilter"),
+            ],
+            "reward_weights": {"survival": 0.6, "water_quality": 0.3, "efficiency": 0.1},
+            "grader": "storm_grader",
+        },
 
-def generate_reset_token(email):
-    """Generate a password reset token."""
-    token = hashlib.md5(
-        f"{email}{time.time()}".encode()
-    ).hexdigest()
-    RESET_TOKENS[token] = {
-        "email": email,
-        "created_at": time.time()
+        "multi_objective": {
+            "difficulty": "hard",
+            "episode_hours": 30 * 24,
+            "description": (
+                "Multi-objective challenge: simultaneously maximize profit, maintain "
+                "fish welfare (stress < 0.3), and minimize environmental impact "
+                "(water discharge quality). Score is the product of all three objectives — "
+                "neglecting any one dimension tanks your score. "
+                "Fish start at 100g in a moderately stocked tank."
+            ),
+            "initial_conditions": {
+                "weight_g": 100.0, "population": 8000, "temp": 29.0,
+                "DO": 7.0, "TAN": 0.2, "pH": 7.5, "day_of_year": 100,
+            },
+            "events": [],
+            "reward_weights": {"profit": 0.33, "welfare": 0.34, "environment": 0.33},
+            "grader": "multi_objective_grader",
+        },
+
+        # =====================================================================
+        # EXTREME TASKS — Everything at once, frontier-model difficulty
+        # =====================================================================
+
+        "catastrophe_prevention": {
+            "difficulty": "extreme",
+            "episode_hours": 14 * 24,
+            "description": (
+                "CRITICAL SITUATION: Multiple simultaneous challenges. "
+                "Day 1: Algae bloom developing (DO supersaturation then crash). "
+                "Day 3: Equipment degradation (aerator at 60% capacity). "
+                "Day 5: Disease outbreak detected. "
+                "Day 7: Market price drops 40%. "
+                "Day 10: Feed delivery delayed (inventory running low). "
+                "Prevent mass mortality, optimize harvest timing despite falling prices, "
+                "manage disease while resources are constrained. "
+                "This task separates frontier models from basic agents."
+            ),
+            "initial_conditions": {
+                "weight_g": 250.0, "population": 7000, "temp": 31.0,
+                "DO": 8.0, "TAN": 0.4, "pH": 7.8, "day_of_year": 200,
+            },
+            "events": [
+                Event(type="algae_bloom", trigger_hour=12, severity=0.6,
+                      duration_hours=48, description="ALGAE BLOOM: DO swinging wildly"),
+                Event(type="equipment_failure", trigger_hour=72, severity=0.4,
+                      duration_hours=96, description="AERATOR DEGRADED: 60% capacity",
+                      equipment="aerator"),
+                Event(type="disease", trigger_hour=120, severity=0.5,
+                      duration_hours=0, description="DISEASE DETECTED: Mortality rising"),
+                Event(type="price_change", trigger_hour=168, severity=0.4,
+                      duration_hours=168, description="MARKET CRASH: Fish price -40%",
+                      price_multiplier=0.6),
+                Event(type="feed_shortage", trigger_hour=240, severity=0.7,
+                      duration_hours=48, description="FEED DELAYED: Inventory critical"),
+            ],
+            "reward_weights": {"survival": 0.3, "profit": 0.25, "water_quality": 0.2,
+                              "disease_control": 0.15, "timing": 0.1},
+            "grader": "catastrophe_grader",
+        },
+
+        "season_management": {
+            "difficulty": "extreme",
+            "episode_hours": 90 * 24,
+            "description": (
+                "Full 90-day season. Fish from 10g to market weight. "
+                "Seasonal temperature changes (summer peak). Random storms, "
+                "random disease. Feed inventory must be managed (deliveries "
+                "every 14 days). Decide optimal harvest timing — market price "
+                "fluctuates weekly. Score = ROI (profit / total investment). "
+                "The best agents will achieve >50% ROI."
+            ),
+            "initial_conditions": {
+                "weight_g": 10.0, "population": 10000, "temp": 27.0,
+                "DO": 7.5, "TAN": 0.05, "pH": 7.5, "day_of_year": 60,
+            },
+            "events": [],
+            "reward_weights": {"roi": 0.4, "growth": 0.2, "survival": 0.2, "fcr": 0.1, "welfare": 0.1},
+            "grader": "season_grader",
+        },
     }
-    return token
 
-def verify_reset_token(token):
-    """Verify a password reset token is valid."""
-    if token in RESET_TOKENS:
-        return RESET_TOKENS[token]
-    return None
 
-def reset_password(token, new_password):
-    """Reset password using a valid token."""
-    token_data = verify_reset_token(token)
-    if not token_data:
-        return False
-
-    email = token_data["email"]
-    password_hash = hashlib.md5(new_password.encode()).hexdigest()
-    USERS[email] = {"password_hash": password_hash}
-
-    return True
-
-def check_password(email, password):
-    """Verify a user\'s password."""
-    user = USERS.get(email)
-    if user:
-        return user["password_hash"] == hashlib.md5(
-            password.encode()
-        ).hexdigest()
-    return False
-''',
-        "ground_truth": [
-            {
-                "line": "10",
-                "severity": "critical",
-                "category": "security",
-                "description": "Reset token generated using MD5 of predictable inputs "
-                "(email + timestamp). MD5 is cryptographically broken and the "
-                "inputs are guessable. Attacker can predict tokens. Should use "
-                "secrets.token_urlsafe() instead.",
-                "keywords": ["md5", "predict", "token", "secrets", "weak", "guessable", "cryptograph"],
-            },
-            {
-                "line": "22",
-                "severity": "major",
-                "category": "security",
-                "description": "Reset tokens never expire. No TTL check on created_at. "
-                "Old tokens remain valid forever. Should check if token age "
-                "exceeds a maximum (e.g., 15 minutes).",
-                "keywords": ["expire", "ttl", "time", "never", "forever", "age", "timeout"],
-            },
-            {
-                "line": "31",
-                "severity": "critical",
-                "category": "security",
-                "description": "MD5 used for password hashing without salt. MD5 is "
-                "unsuitable for password storage — too fast, no salt, vulnerable "
-                "to rainbow tables. Should use bcrypt, scrypt, or argon2.",
-                "keywords": ["md5", "password", "hash", "salt", "bcrypt", "argon", "rainbow"],
-            },
-            {
-                "line": "26",
-                "severity": "major",
-                "category": "security",
-                "description": "Token not invalidated after use. A reset token can be "
-                "reused multiple times. Should delete token from RESET_TOKENS "
-                "after successful password reset.",
-                "keywords": ["invalidat", "reuse", "delete", "remove", "after", "single"],
-            },
-        ],
-    },
-    "hard_003": {
-        "difficulty": "hard",
-        "language": "python",
-        "context": "A data processing pipeline that handles CSV uploads from external partners.",
-        "code": '''import csv
-import subprocess
-import pickle
-import os
-from io import StringIO
-
-ALLOWED_EXTENSIONS = {".csv", ".tsv"}
-
-def validate_upload(filename):
-    """Check if the uploaded file has an allowed extension."""
-    _, ext = os.path.splitext(filename)
-    return ext.lower() in ALLOWED_EXTENSIONS
-
-def process_csv(file_content, delimiter=","):
-    """Parse CSV content and return list of dicts."""
-    reader = csv.DictReader(StringIO(file_content), delimiter=delimiter)
-    rows = list(reader)
-    return rows
-
-def transform_data(rows, script_name):
-    """Apply a named transformation script to the data."""
-    output = subprocess.run(
-        f"python transforms/{script_name}",
-        input=str(rows),
-        capture_output=True,
-        text=True,
-        shell=True
-    )
-    return output.stdout
-
-def cache_results(data, cache_path):
-    """Cache processed data for later retrieval."""
-    with open(cache_path, "wb") as f:
-        pickle.dump(data, f)
-
-def load_cached(cache_path):
-    """Load previously cached results."""
-    with open(cache_path, "rb") as f:
-        return pickle.load(f)
-
-def generate_report(rows, output_format="csv"):
-    """Generate a report from processed data."""
-    if output_format == "csv":
-        header = rows[0].keys()
-        lines = [",".join(header)]
-        for row in rows:
-            lines.append(",".join(str(row[k]) for k in header))
-        return "\\n".join(lines)
-    return str(rows)
-''',
-        "ground_truth": [
-            {
-                "line": "23",
-                "severity": "critical",
-                "category": "security",
-                "description": "Command injection via shell=True with user-controlled "
-                "script_name. Attacker can inject commands like "
-                "'transform.py; rm -rf /'. Should use subprocess.run with a "
-                "list of args and shell=False, and validate script_name.",
-                "keywords": ["shell", "injection", "command", "subprocess", "shell=true"],
-            },
-            {
-                "line": "35",
-                "severity": "critical",
-                "category": "security",
-                "description": "Unsafe pickle deserialization. Loading pickled data from "
-                "files can execute arbitrary code. If cache files can be "
-                "tampered with, this is a remote code execution vector. "
-                "Should use json or a safe serialization format.",
-                "keywords": ["pickle", "deserialization", "arbitrary", "code execution", "unsafe"],
-            },
-            {
-                "line": "12",
-                "severity": "major",
-                "category": "security",
-                "description": "Extension-only file validation is insufficient. Doesn't "
-                "check MIME type or actual content. Attacker could upload "
-                "a malicious file with a .csv extension.",
-                "keywords": ["extension", "mime", "content", "validation", "insufficient"],
-            },
-        ],
-    },
-}
+TASKS = _make_tasks()
 
 
 def get_task(task_id: str) -> Dict[str, Any]:
-    """Get a task by ID."""
     if task_id not in TASKS:
-        raise ValueError(f"Unknown task_id: {task_id}")
+        raise ValueError(f"Unknown task_id: {task_id}. Available: {list(TASKS.keys())}")
     return TASKS[task_id]
 
 
-def get_tasks_by_difficulty(difficulty: str) -> List[str]:
-    """Get all task IDs for a given difficulty level."""
-    return [tid for tid, t in TASKS.items() if t["difficulty"] == difficulty]
-
-
 def list_all_tasks() -> List[Dict[str, str]]:
-    """List all tasks with their IDs and difficulty levels."""
     return [
-        {"task_id": tid, "difficulty": t["difficulty"], "language": t["language"]}
-        for tid, t in TASKS.items()
+        {
+            "task_id": tid,
+            "difficulty": task["difficulty"],
+            "description": task["description"],
+            "episode_hours": task["episode_hours"],
+        }
+        for tid, task in TASKS.items()
     ]

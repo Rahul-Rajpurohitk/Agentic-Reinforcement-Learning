@@ -9,21 +9,11 @@ pydantic>=2.0.0
 # Client
 httpx>=0.25.0
 
-# Baseline Inference
+# Inference
 openai>=1.0.0
-
-# LLM Training (GRPO with TRL) — optional, needs GPU
-trl>=0.17.0
-transformers>=4.40.0
-datasets>=2.18.0
-accelerate>=0.28.0
 
 # HuggingFace Hub (deployment)
 huggingface-hub>=0.22.0
 
 # Testing
 pytest>=7.0.0
-
-# Dev Tools
-black
-ruff

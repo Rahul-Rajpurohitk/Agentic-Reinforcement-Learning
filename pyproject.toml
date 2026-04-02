@@ -1,11 +1,11 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "code-review-env"
+name = "fish-farm-env"
 version = "1.0.0"
-description = "Code Review OpenEnv — AI agents review code for bugs and security vulnerabilities"
+description = "Fish Farm OpenEnv — AI agent manages a Nile Tilapia RAS aquaculture system"
 requires-python = ">=3.10"
 authors = [
     {name = "Rahul Rajpurohit", email = "rahulrajpurohit2024@gmail.com"},
