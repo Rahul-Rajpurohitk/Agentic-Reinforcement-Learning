@@ -350,6 +350,50 @@ class TestNighttimeDORisk:
         assert action["aeration_rate"] >= 0.9  # should boost for high risk
 
 
+class TestHeatWaveEvent:
+    """Test that heat_wave events actually raise water temperature."""
+
+    def test_heat_wave_raises_temperature(self):
+        """Heat wave event should increase water temperature over time."""
+        from agentic_rl.engine.events import Event
+        sim = FishFarmSimulator(seed=42)
+        sim.reset(
+            initial_temp=28.0,
+            base_air_temp=30.0,
+            scheduled_events=[
+                Event(type="heat_wave", trigger_hour=0, severity=0.7,
+                      duration_hours=48, description="Heat wave test"),
+            ],
+        )
+        # Run 24 hours with heat wave active
+        for _ in range(24):
+            sim.step(0.3, 0.5, 0.0, 0.02, False, "none")
+        # Water should warm up from the heat wave
+        assert sim.water.temperature > 28.0
+
+    def test_heat_wave_ends_correctly(self):
+        """After heat wave ends, temperature should not keep rising."""
+        from agentic_rl.engine.events import Event
+        sim = FishFarmSimulator(seed=42)
+        sim.reset(
+            initial_temp=28.0,
+            base_air_temp=28.0,
+            scheduled_events=[
+                Event(type="heat_wave", trigger_hour=0, severity=0.7,
+                      duration_hours=6, description="Short heat wave"),
+            ],
+        )
+        # Run through the 6-hour heat wave
+        for _ in range(6):
+            sim.step(0.3, 0.5, 0.0, 0.02, False, "none")
+        temp_at_end = sim.water.temperature
+        # Run 12 more hours after heat wave ended — temp should stabilize/drop
+        for _ in range(12):
+            sim.step(0.3, 0.5, -0.3, 0.02, False, "none")  # slight cooling
+        # Should not have increased further (heat wave is over)
+        assert sim.water.temperature <= temp_at_end + 1.0  # small tolerance for thermal inertia
+
+
 class TestVaccinationProphylaxis:
     """Test that vaccination works as preventive measure (KB-03 Sec 4.2)."""
 

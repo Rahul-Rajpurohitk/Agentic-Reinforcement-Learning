@@ -204,6 +204,11 @@ class FishFarmSimulator:
         weather = self.weather.get_conditions(day_of_year, self.hour)
         self.weather.step(self.hour)
 
+        # Heat wave event: boost air temperature while active
+        heat_wave = self.events.get_active_event("heat_wave")
+        if heat_wave is not None:
+            weather["air_temp"] += heat_wave.severity * 10.0  # 0.7 severity → +7°C
+
         # Random storm check with seasonal modulation (only if no storm from events)
         if not self.weather.storm_active:
             self.weather.check_random_storm(day_of_year=day_of_year)
@@ -392,6 +397,11 @@ class FishFarmSimulator:
                     severity=event.severity,
                     duration_hours=event.duration_hours
                 )
+
+            elif event.type == "heat_wave":
+                # Heat wave: handled via active event check in weather section
+                # (no persistent state change needed — reverts when event ends)
+                pass
 
             elif event.type == "algae_bloom":
                 # Boost phytoplankton biomass → causes DO swings

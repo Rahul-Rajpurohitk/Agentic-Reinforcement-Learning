@@ -79,9 +79,22 @@ def _build_feedback(sim_state: Dict[str, Any], task_desc: str, hour: int) -> str
     for alert in events.get("active_events", []):
         parts.append(f"EVENT: {alert}")
 
-    # Economics milestone
+    # Economics milestones
     if fish["weight_g"] >= 400 and hour > 0:
         parts.append(f"Fish have reached market weight ({fish['weight_g']:.0f}g). Consider harvesting.")
+
+    # Cost efficiency feedback
+    breakdown = econ.get("cost_breakdown", {})
+    feed_pct = breakdown.get("feed", {}).get("pct", 0)
+    if feed_pct > 75:
+        parts.append(f"Feed is {feed_pct:.0f}% of costs — high. Consider reducing feeding rate.")
+
+    # Vaccination readiness (actionable advice for long episodes)
+    if (not disease["active"] and
+            not disease.get("treatment_active", False) and
+            disease.get("recovered", 0) == 0 and
+            hour < 48):
+        parts.append("Tip: Vaccination available ($100, prevents 80% of future infections).")
 
     if not parts[1:]:  # no alerts after the time line
         parts.append("All systems nominal.")
