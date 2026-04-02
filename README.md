@@ -1,3 +1,14 @@
+---
+title: Fish Farm Environment Server
+emoji: 🐟
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+app_port: 8000
+base_path: /web
+---
+
 # Fish Farm RL Environment
 
 **The world's first OpenEnv-compatible aquaculture farming environment**
