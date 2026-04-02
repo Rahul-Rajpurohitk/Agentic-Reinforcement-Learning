@@ -40,8 +40,8 @@ An agent that feeds aggressively grows fish faster but risks catastrophic ammoni
 
 | Engine | Key Features |
 |--------|-------------|
-| **Water Quality** | 10 sub-steps/hour DO mass balance, two-stage nitrification (AOB + NOB), denitrification under anoxic conditions, Smith-Talling photosynthesis, Penman evaporation model, Beer-Lambert light attenuation |
-| **Fish Biology** | FAO bioenergetic growth ODE, dual respiration model (tilapia polynomial R²=0.99 + allometric fallback), size-dependent feeding rates, feeding response behavior |
+| **Water Quality** | 10 sub-steps/hour DO mass balance, two-stage nitrification (AOB + NOB), denitrification under anoxic conditions, Smith-Talling photosynthesis, Penman evaporation model, Beer-Lambert light attenuation, nighttime DO crash risk tracking |
+| **Fish Biology** | FAO bioenergetic growth ODE with stochastic noise (Wiener process σ=2%), dual respiration model (tilapia polynomial R²=0.99 + allometric fallback), size-dependent feeding rates, feeding response behavior |
 | **Disease** | SEIR compartmental model with immunity waning (R→S at 1/30 per day), temperature-dependent pathogen virulence, stress-triggered outbreaks, 4 treatment options + vaccination |
 | **Economics** | Ornstein-Uhlenbeck stochastic feed pricing, seasonal market multipliers (Christmas +15%, Lent +10%, mid-year dip -5%), marginal cost tracking, weight-dependent fish valuation with market premium curve |
 | **Weather** | Diel temperature/solar cycle, seasonal storm probability (3× during monsoon), Beaufort wind scale, humidity-driven evaporation |
@@ -91,9 +91,9 @@ dp = κ(μ - p)dt + σ·dW,  bounded to ±40% of mean
 }
 ```
 
-### Observation Space (30+ fields, partial observability)
+### Observation Space (47 fields, partial observability)
 
-The agent sees sensor readings (temperature, DO, pH, TAN, UIA, NO2, NO3, water quality score), fish status (weight, population, mortality, feeding response, stress, FCR, SGR, growth rate, stocking density, survival rate), economics (costs, fish value, profit, feed price, market multiplier, ROI, marginal cost), weather (forecast, daytime, storm, humidity), equipment status, disease behavioral signals, and event alerts.
+The agent sees sensor readings (temperature, DO, pH, TAN, UIA, NO2, NO3, water quality score, nighttime DO crash risk), fish status (weight, population, mortality, feeding response, stress, FCR, SGR, growth rate, stocking density, survival rate), economics (costs, fish value, profit, feed price, market multiplier, ROI, marginal cost), weather (forecast, daytime, storm, humidity, day of year), equipment status, disease behavioral signals, and event alerts.
 
 **Disease infection count is hidden** — the agent must infer disease from behavioral indicators (mortality spikes + feeding refusal + elevated stress → `disease_suspected` flag).
 
@@ -149,7 +149,7 @@ cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
 pip install -e .
 
-# Run tests (221 tests)
+# Run tests (265 tests)
 pytest tests/ -v
 
 # Start environment server
@@ -215,14 +215,17 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
-├── tests/                    # 221 tests (2.3s)
+├── tests/                    # 265 tests (2.0s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
 │   ├── test_disease.py       # SEIR dynamics, treatments, vaccination, immunity, temperature
 │   ├── test_economics.py     # Costs, stochastic pricing, seasonal markets, ROI, breakdown
-│   ├── test_simulator.py     # Integration, observations, heuristic agent
+│   ├── test_simulator.py     # Integration, observations, heuristic, stochastic growth, nighttime risk
+│   ├── test_constants.py     # Parameter sanity, utility functions (32 tests)
 │   ├── test_tasks_grader.py  # Task definitions, all 12 graders
-│   └── test_rewards.py       # All reward component keys
+│   ├── test_rewards.py       # All reward component keys, delta rewards, disease/harvest
+│   ├── test_models.py        # Action/Observation/State model validation
+│   └── test_endpoints.py     # /tasks, /grader, /baseline API endpoints
 └── docs/
     └── knowledge-base/       # 4,400+ lines of aquaculture research (40+ citations)
 ```

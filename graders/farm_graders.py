@@ -2,6 +2,10 @@
 
 Each grader takes the final simulator state and episode history,
 returns a score between 0.0 and 1.0 with partial credit.
+
+Scoring philosophy: every grader has 3-6 weighted components that sum to 1.0.
+Partial credit is given for each component (no cliff effects). Detailed
+feedback describes exactly what the agent did well and poorly.
 """
 
 from typing import Any, Dict, List
@@ -31,7 +35,6 @@ class FarmGrader(BaseGrader):
 
         fcr = fish.get("fcr", 3.0)
         if fcr <= 0:
-            # FCR=0 means no net biomass gain (fish lost weight or died) — no credit
             fcr_score = 0.0
         elif fcr <= 1.6:
             fcr_score = 0.3
@@ -44,11 +47,16 @@ class FarmGrader(BaseGrader):
         survival_score = min(1.0, survival / 0.99) * 0.3
 
         score = weight_score + fcr_score + survival_score
+
+        details = [
+            f"Weight: {fish['weight_g']:.1f}g (target {target}g) [{weight_score:.2f}/0.40]",
+            f"FCR: {fcr:.2f} (target <2.0) [{fcr_score:.2f}/0.30]",
+            f"Survival: {survival:.1%} [{survival_score:.2f}/0.30]",
+        ]
         return GradeResult(
             score=round(score, 3),
             passed=score >= 0.5,
-            feedback=f"Weight: {fish['weight_g']:.1f}g (target {target}g), "
-                    f"FCR: {fcr:.2f}, Survival: {survival:.1%}",
+            feedback=" | ".join(details),
         )
 
     def _oxygen_grader(self, state, history, config) -> GradeResult:
@@ -175,18 +183,35 @@ class FarmGrader(BaseGrader):
         econ = state["economics"]
         target = config.get("target_weight", 400.0)
 
-        profit_score = max(0, min(1.0, econ["current_profit"] / 5000)) * 0.3
-        weight_score = min(1.0, fish["weight_g"] / target) * 0.25
-        survival_score = min(1.0, fish["survival_rate"] / 0.85) * 0.25
+        profit_score = max(0, min(1.0, econ["current_profit"] / 5000)) * 0.25
+        weight_score = min(1.0, fish["weight_g"] / target) * 0.20
+        survival_score = min(1.0, fish["survival_rate"] / 0.85) * 0.20
         fcr = fish.get("fcr", 3.0)
-        fcr_score = max(0, min(1.0, (2.5 - fcr) / 1.0)) * 0.1
+        fcr_score = max(0, min(1.0, (2.5 - fcr) / 1.0)) * 0.10
         avg_wq = sum(h["water"]["water_quality_score"] for h in history) / max(1, len(history))
-        wq_score = avg_wq * 0.1
+        wq_score = avg_wq * 0.10
 
-        score = profit_score + weight_score + survival_score + fcr_score + wq_score
-        return GradeResult(score=round(score, 3), passed=score >= 0.5,
-                          feedback=f"Weight: {fish['weight_g']:.1f}g, Profit: ${econ['current_profit']:.0f}, "
-                                  f"Survival: {fish['survival_rate']:.1%}")
+        # Harvest timing bonus: harvesting at market weight gets more credit
+        if state["harvested"] and fish["weight_g"] >= 400:
+            harvest_bonus = 0.15
+        elif state["harvested"] and fish["weight_g"] >= 200:
+            harvest_bonus = 0.08
+        elif state["harvested"]:
+            harvest_bonus = 0.03  # harvested early, better than nothing
+        else:
+            harvest_bonus = 0.0  # didn't harvest — fish value unrealized
+
+        score = profit_score + weight_score + survival_score + fcr_score + wq_score + harvest_bonus
+
+        details = [
+            f"Weight: {fish['weight_g']:.1f}g/{target}g [{weight_score:.2f}/0.20]",
+            f"Profit: ${econ['current_profit']:.0f} [{profit_score:.2f}/0.25]",
+            f"Survival: {fish['survival_rate']:.1%} [{survival_score:.2f}/0.20]",
+            f"FCR: {fcr:.2f} [{fcr_score:.2f}/0.10]",
+            f"Harvested: {'yes' if state['harvested'] else 'no'} [{harvest_bonus:.2f}/0.15]",
+        ]
+        return GradeResult(score=round(min(1.0, score), 3), passed=score >= 0.5,
+                          feedback=" | ".join(details))
 
     def _storm_grader(self, state, history, config) -> GradeResult:
         survival = state["fish"]["survival_rate"]
@@ -218,15 +243,44 @@ class FarmGrader(BaseGrader):
         disease_deaths = state["disease"]["total_disease_deaths"]
 
         survival_score = min(1.0, survival / 0.70) * 0.3
-        profit_score = max(0, min(1.0, (profit + 1000) / 3000)) * 0.25
+        profit_score = max(0, min(1.0, (profit + 1000) / 3000)) * 0.20
         avg_wq = sum(h["water"]["water_quality_score"] for h in history) / max(1, len(history))
-        wq_score = avg_wq * 0.2
+        wq_score = avg_wq * 0.15
         disease_score = max(0, 1.0 - disease_deaths / 500) * 0.15
+
+        # Crisis response quality: how quickly did the agent react to crises?
+        # Measure recovery speed: hours between worst state and return to stable
+        crisis_response = 0.1
+        if history:
+            worst_do_idx = min(range(len(history)),
+                             key=lambda i: history[i]["water"]["DO"])
+            if worst_do_idx < len(history) - 1:
+                # Check how many hours to recover to DO > 4.0 after worst point
+                recovery_hours = 0
+                for i in range(worst_do_idx, min(worst_do_idx + 24, len(history))):
+                    if history[i]["water"]["DO"] >= 4.0:
+                        recovery_hours = i - worst_do_idx
+                        break
+                if 0 < recovery_hours <= 6:
+                    crisis_response = 0.1  # fast recovery
+                elif recovery_hours <= 12:
+                    crisis_response = 0.06  # medium recovery
+                else:
+                    crisis_response = 0.02  # slow or no recovery
+
         timing_score = 0.1 if state["harvested"] else 0.0
 
-        score = survival_score + profit_score + wq_score + disease_score + timing_score
-        return GradeResult(score=round(score, 3), passed=score >= 0.3,
-                          feedback=f"Catastrophe survival: {survival:.1%}, Profit: ${profit:.0f}")
+        score = survival_score + profit_score + wq_score + disease_score + crisis_response + timing_score
+
+        details = [
+            f"Survival: {survival:.1%} [{survival_score:.2f}/0.30]",
+            f"Profit: ${profit:.0f} [{profit_score:.2f}/0.20]",
+            f"Disease deaths: {disease_deaths} [{disease_score:.2f}/0.15]",
+            f"Crisis response [{crisis_response:.2f}/0.10]",
+            f"Harvested: {'yes' if state['harvested'] else 'no'}",
+        ]
+        return GradeResult(score=round(min(1.0, score), 3), passed=score >= 0.3,
+                          feedback=" | ".join(details))
 
     def _season_grader(self, state, history, config) -> GradeResult:
         econ = state["economics"]
