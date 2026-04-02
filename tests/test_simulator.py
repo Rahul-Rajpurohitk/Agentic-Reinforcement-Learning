@@ -469,3 +469,105 @@ class TestHarvestRevenue:
         value = econ.calculate_fish_value(200.0, avg_weight_g=350.0)
         revenue = econ.calculate_harvest_revenue(200.0, avg_weight_g=350.0)
         assert abs(value - revenue) < 0.01
+
+
+class TestTaskSpecificHeuristics:
+    """Test task-specific heuristic strategies in inference.py."""
+
+    def _base_obs(self, **overrides):
+        obs = {
+            "dissolved_oxygen": 6.5, "ammonia_toxic": 0.01, "ammonia": 0.2,
+            "nitrite": 0.05, "temperature": 28.0, "stress_level": 0.1,
+            "feeding_response": "normal", "avg_fish_weight": 150.0,
+            "population": 5000, "feed_remaining_kg": 200.0,
+            "biofilter_working": True, "aerator_working": True,
+            "disease_suspected": False, "is_daytime": True,
+            "market_price_multiplier": 1.0, "mortality_today": 0,
+            "nighttime_do_risk": 0.1, "feed_price_per_kg": 0.50,
+            "water_quality_score": 0.85, "algae_bloom": False,
+        }
+        obs.update(overrides)
+        return obs
+
+    def test_storm_pre_positioning(self):
+        """Storm response: pre-storm phase should boost aeration and reduce feeding."""
+        from inference import heuristic_action
+        obs = self._base_obs()
+        action = heuristic_action(obs, "storm_response", step=10, max_hours=120)
+        assert action["aeration_rate"] >= 0.8
+        assert action["water_exchange_rate"] >= 0.04
+
+    def test_storm_power_outage_minimal_feeding(self):
+        """During power outage (h24-36), feeding should be minimal."""
+        from inference import heuristic_action
+        obs = self._base_obs(aerator_working=False)
+        action = heuristic_action(obs, "storm_response", step=28, max_hours=120)
+        assert action["feeding_rate"] <= 0.1
+
+    def test_ammonia_crisis_aggressive_exchange(self):
+        """Ammonia crisis with high UIA should trigger aggressive water exchange."""
+        from inference import heuristic_action
+        obs = self._base_obs(ammonia_toxic=0.08, ammonia=1.5, biofilter_working=False)
+        action = heuristic_action(obs, "ammonia_crisis", step=5, max_hours=72)
+        assert action["water_exchange_rate"] >= 0.06
+        assert action["feeding_rate"] <= 0.15
+
+    def test_disease_outbreak_early_vaccination(self):
+        """Disease outbreak task: should vaccinate early (before h12 trigger)."""
+        from inference import heuristic_action
+        obs = self._base_obs()
+        action = heuristic_action(obs, "disease_outbreak", step=3, max_hours=240)
+        assert action["treatment"] == "vaccination"
+
+    def test_multi_objective_stress_reduction(self):
+        """Multi-objective: high stress should reduce feeding for welfare."""
+        from inference import heuristic_action
+        obs = self._base_obs(stress_level=0.35)
+        action = heuristic_action(obs, "multi_objective", step=100, max_hours=720)
+        assert action["feeding_rate"] <= 0.35
+        assert action["aeration_rate"] >= 0.6
+
+    def test_temperature_stress_cooling(self):
+        """Temperature stress: hot temps should trigger cooling + more aeration."""
+        from inference import heuristic_action
+        obs = self._base_obs(temperature=35.0)
+        action = heuristic_action(obs, "temperature_stress", step=30, max_hours=120)
+        assert action["aeration_rate"] >= 0.85
+        assert action["feeding_rate"] <= 0.3
+
+    def test_nitrite_triggers_salt_treatment(self):
+        """High nitrite should trigger salt treatment."""
+        from inference import heuristic_action
+        obs = self._base_obs(nitrite=0.8)
+        action = heuristic_action(obs, "water_quality_balance", step=10, max_hours=168)
+        assert action["treatment"] == "salt"
+
+    def test_full_growout_harvest_at_market_weight(self):
+        """Full growout: harvest when weight >= 450 and market is decent."""
+        from inference import heuristic_action
+        obs = self._base_obs(avg_fish_weight=460.0, market_price_multiplier=1.05)
+        action = heuristic_action(obs, "full_growout", step=1000, max_hours=1440)
+        assert action["harvest_decision"] is True
+
+    def test_season_management_conserve_low_feed(self):
+        """Season management: conserve feed when inventory low."""
+        from inference import heuristic_action
+        obs = self._base_obs(feed_remaining_kg=30.0)
+        action = heuristic_action(obs, "season_management", step=500, max_hours=2160)
+        assert action["feeding_rate"] <= 0.25
+
+    def test_feed_price_sensitivity(self):
+        """Expensive feed should reduce feeding rate by 15%."""
+        from inference import heuristic_action
+        obs_cheap = self._base_obs(feed_price_per_kg=0.40)
+        obs_expensive = self._base_obs(feed_price_per_kg=0.70)
+        action_cheap = heuristic_action(obs_cheap, "feeding_basics", step=10, max_hours=168)
+        action_expensive = heuristic_action(obs_expensive, "feeding_basics", step=10, max_hours=168)
+        assert action_expensive["feeding_rate"] < action_cheap["feeding_rate"]
+
+    def test_catastrophe_pre_disease_vaccination(self):
+        """Catastrophe: should vaccinate in h96-108 before disease at h120."""
+        from inference import heuristic_action
+        obs = self._base_obs()
+        action = heuristic_action(obs, "catastrophe_prevention", step=100, max_hours=336)
+        assert action["treatment"] == "vaccination"

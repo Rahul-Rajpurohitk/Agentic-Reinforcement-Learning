@@ -13,6 +13,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from openenv.core.env_server import Environment
+from openenv.core.env_server.types import EnvironmentMetadata
 
 from ..models import FarmAction, FarmObservation, FarmState
 from ..tasks import get_task
@@ -120,6 +121,30 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
     """
 
     SUPPORTS_CONCURRENT_SESSIONS = True
+
+    def get_metadata(self) -> EnvironmentMetadata:
+        """Rich metadata for hackathon discovery and /metadata endpoint."""
+        import os
+        readme = None
+        readme_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "README.md")
+        try:
+            with open(readme_path, "r") as f:
+                readme = f.read()
+        except FileNotFoundError:
+            pass
+        return EnvironmentMetadata(
+            name="Fish Farm OpenEnv",
+            description=(
+                "AI agent manages a Nile Tilapia Recirculating Aquaculture System (RAS) "
+                "with 6 continuous controls (feeding, aeration, heating, water exchange, "
+                "harvest, disease treatment), 13 coupled state variables, SEIR disease "
+                "dynamics, bioenergetic growth model, stochastic economics, nighttime DO "
+                "crash risk, and 12 tasks from easy to extreme difficulty."
+            ),
+            version="1.0.0",
+            author="Rahul Rajpurohit",
+            readme_content=readme,
+        )
 
     def __init__(self):
         super().__init__()

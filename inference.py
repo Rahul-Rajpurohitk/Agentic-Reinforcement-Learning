@@ -79,7 +79,7 @@ Overfeeding → ammonia rises → nitrification consumes O2 → DO drops → str
 
 ## Treatment Guide
 - 'antibiotics': Use during active disease. Doubles recovery rate but harms biofilter (reduces TAN removal).
-- 'salt': Use for nitrite stress. Mild recovery boost (1.3x), cheap ($10/day).
+- 'salt': Use when nitrite (NO2) >0.5. Blocks nitrite uptake via gill chloride cells. Cheap ($10/day). Use alongside water exchange for fastest recovery.
 - 'probiotics': Boosts biofilter AND recovery (1.5x). Good for prevention/mild issues ($30/day).
 - 'vaccination': One-time $100. Prevents 80% of future infections. Best used early when >30 days remain.
 - 'none': Default. Don't over-treat — antibiotics harm the biofilter.
@@ -114,6 +114,7 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     DO = obs.get("dissolved_oxygen", 7.0)
     UIA = obs.get("ammonia_toxic", 0.005)
     TAN = obs.get("ammonia", 0.1)
+    NO2 = obs.get("nitrite", 0.0)
     temp = obs.get("temperature", 28.0)
     stress = obs.get("stress_level", 0.0)
     mortality = obs.get("mortality_today", 0)
@@ -129,6 +130,7 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     nighttime_do_risk = obs.get("nighttime_do_risk", 0.0)
     feed_price = obs.get("feed_price_per_kg", 0.50)
     hours_left = max_hours - step
+    wq_score = obs.get("water_quality_score", 0.8)
 
     # ---- Aeration (proactive nighttime crash prevention) ----
     algae_bloom = obs.get("algae_bloom", False)
@@ -201,6 +203,8 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         treatment = "antibiotics"
     elif disease_suspected:
         treatment = "probiotics"  # milder, doesn't harm biofilter
+    elif NO2 > 0.5 and not disease_suspected:
+        treatment = "salt"  # salt protects against nitrite toxicity ($10/day)
     elif not biofilter_ok and stress < 0.3:
         treatment = "probiotics"  # helps biofilter recover
 
@@ -208,17 +212,57 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     # Works without active disease — moves 80% susceptible → recovered
     # Best used early: long episodes, catastrophe (disease at hour 120), season mgmt
     if not disease_suspected and treatment == "none":
-        if step < 48 and hours_left > 20 * 24:
-            treatment = "vaccination"  # early in long episodes
-        elif task_id == "catastrophe_prevention" and 96 <= step <= 108:
+        if task_id == "catastrophe_prevention" and 96 <= step <= 108:
             treatment = "vaccination"  # vaccinate before disease event at h120
+        elif task_id == "disease_outbreak" and step <= 6:
+            treatment = "vaccination"  # vaccinate before disease at h12
+        elif task_id == "season_management" and step <= 48:
+            treatment = "vaccination"  # early prevention for 90-day episode
+        elif task_id == "full_growout" and step <= 48:
+            treatment = "vaccination"  # early prevention for 60-day episode
+        elif step < 48 and hours_left > 20 * 24:
+            treatment = "vaccination"  # early in long episodes
+
+    # ---- Task-Specific Strategies ----
 
     # Storm pre-positioning: boost aeration and reduce feeding before storm hits
-    if task_id == "storm_response" and step < 24:
-        # Pre-storm: supersaturate DO, reduce feeding to lower ammonia baseline
-        aeration = max(aeration, 0.8)  # build up DO reserves
-        feeding *= 0.7  # lower ammonia before equipment goes offline
-        exchange = max(exchange, 0.04)  # flush ammonia pre-storm
+    if task_id == "storm_response":
+        if step < 24:
+            # Pre-storm: supersaturate DO, reduce feeding to lower ammonia baseline
+            aeration = max(aeration, 0.8)  # build up DO reserves
+            feeding *= 0.7  # lower ammonia before equipment goes offline
+            exchange = max(exchange, 0.04)  # flush ammonia pre-storm
+        elif 24 <= step < 36:
+            # During power outage: minimize waste production
+            feeding = min(feeding, 0.1)  # almost no feeding — no DO for fish
+            exchange = max(exchange, 0.06)  # max manual water exchange
+
+    # Temperature stress: extra cooling and aeration during heat wave
+    if task_id == "temperature_stress" and temp > 33:
+        aeration = max(aeration, 0.85)  # warm water holds less O2
+        feeding = min(feeding, 0.3)  # reduce metabolic load in heat
+        exchange = max(exchange, 0.04)  # cooler incoming water
+
+    # Ammonia crisis: aggressive dilution + minimal feeding
+    if task_id == "ammonia_crisis":
+        if UIA > 0.05 or TAN > 1.0:
+            feeding = min(feeding, 0.15)  # starve down ammonia
+            exchange = max(exchange, 0.06)  # aggressive dilution
+        if not biofilter_ok:
+            treatment = "probiotics" if treatment == "none" else treatment
+
+    # Multi-objective: keep stress low for welfare component (geometric mean)
+    if task_id == "multi_objective":
+        if stress > 0.2:
+            feeding = min(feeding, 0.35)  # reduce feed-induced stress
+            aeration = max(aeration, 0.6)
+        if stress > 0.4:
+            feeding = min(feeding, 0.2)
+            exchange = max(exchange, 0.04)
+
+    # Season management: conserve feed inventory between deliveries
+    if task_id == "season_management" and feed_remaining < 50:
+        feeding = min(feeding, 0.25)  # conserve until next delivery
 
     # ---- Harvest ----
     harvest = False
@@ -229,6 +273,12 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     # Harvest if market premium and fish are ready
     elif weight >= 500 and market_mult >= 1.1:
         harvest = True
+    # Full growout/season: harvest at market weight when price is decent
+    elif task_id in ("full_growout", "season_management") and weight >= 450 and market_mult >= 1.0:
+        harvest = True
+    # Full growout: harvest near end if fish are close to target
+    elif task_id == "full_growout" and weight >= 350 and hours_left <= 48:
+        harvest = True
     # Emergency harvest if population crashing
     elif population < 1000 and weight > 200:
         harvest = True
@@ -238,6 +288,9 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     # Catastrophe task: harvest before feed shortage if fish are heavy enough
     elif task_id == "catastrophe_prevention" and weight >= 350 and market_mult < 0.7 and hours_left < 96:
         harvest = True  # cut losses in market crash + feed shortage
+    # Season management: harvest when ROI is good and near end
+    elif task_id == "season_management" and weight >= 400 and hours_left <= 72:
+        harvest = True
 
     return {
         "feeding_rate": round(feeding, 2),
