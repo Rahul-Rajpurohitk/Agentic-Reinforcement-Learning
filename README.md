@@ -149,7 +149,7 @@ cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
 pip install -e .
 
-# Run tests (288 tests)
+# Run tests (299 tests)
 pytest tests/ -v
 
 # Start environment server
@@ -194,6 +194,7 @@ python inference.py
 ```
 ├── openenv.yaml              # OpenEnv spec (spec_version: 1, type: space)
 ├── inference.py              # LLM agent + heuristic fallback (< 20 min on 2 vCPU/8GB)
+├── server/app.py             # OpenEnv multi-mode entry point (uv run server)
 ├── Dockerfile                # Container spec
 ├── requirements.txt
 ├── src/agentic_rl/
@@ -215,7 +216,7 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
-├── tests/                    # 288 tests (2.1s)
+├── tests/                    # 299 tests (2.2s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
 │   ├── test_disease.py       # SEIR dynamics, treatments, vaccination, immunity, temperature
