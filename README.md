@@ -149,7 +149,7 @@ cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
 pip install -e .
 
-# Run tests (299 tests)
+# Run tests (304 tests)
 pytest tests/ -v
 
 # Start environment server
@@ -216,7 +216,7 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
-├── tests/                    # 299 tests (2.2s)
+├── tests/                    # 304 tests (2.0s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
 │   ├── test_disease.py       # SEIR dynamics, treatments, vaccination, immunity, temperature
