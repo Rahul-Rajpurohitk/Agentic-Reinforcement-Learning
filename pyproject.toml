@@ -24,7 +24,7 @@ training = ["trl>=0.17.0", "transformers>=4.40.0", "datasets>=2.18.0", "accelera
 dev = ["pytest>=7.0.0", "black", "ruff"]
 
 [project.scripts]
-server = "uvicorn:main"
+server = "server.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
