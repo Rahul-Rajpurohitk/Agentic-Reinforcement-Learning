@@ -5,4 +5,4 @@ type: space
 runtime: fastapi
 app: src.agentic_rl.server.app:app
 port: 8000
-description: "AI agent manages a Nile Tilapia RAS fish farm — bioenergetic growth, water quality, disease, economics"
+description: "AI agent manages a Nile Tilapia RAS fish farm with 6 continuous controls, 13 coupled state variables, SEIR disease, bioenergetic growth, stochastic economics, and 12 tasks from easy to extreme"
