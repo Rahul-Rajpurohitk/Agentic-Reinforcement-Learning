@@ -19,7 +19,8 @@ from agentic_rl.rewards import calculate_reward as _calculate_reward
 def _make_sim_state(growth_rate=2.0, mortality=0, survival=0.98, stress=0.1,
                     do=6.5, uia=0.01, wq_score=0.85, fcr=1.6,
                     profit=500, total_cost=100, total_hours=24,
-                    weight=100.0):
+                    weight=100.0, roi_pct=50.0, marginal_cost=0.5,
+                    market_price_multiplier=1.0):
     """Build a minimal sim state for reward testing."""
     return {
         "fish": {
@@ -38,6 +39,9 @@ def _make_sim_state(growth_rate=2.0, mortality=0, survival=0.98, stress=0.1,
         "economics": {
             "current_profit": profit,
             "total_cost": total_cost,
+            "roi_pct": roi_pct,
+            "marginal_cost_per_hour": marginal_cost,
+            "market_price_multiplier": market_price_multiplier,
         },
         "time": {
             "total_hours": total_hours,
@@ -115,10 +119,11 @@ class TestFCRReward:
         reward = _calculate_reward(state, None, {"fcr": 1.0})
         assert reward < 0
 
-    def test_zero_fcr_neutral(self):
+    def test_zero_fcr_slight_penalty(self):
+        """FCR=0 means no net biomass gain — should be slightly penalized."""
         state = _make_sim_state(fcr=0)
         reward = _calculate_reward(state, None, {"fcr": 1.0})
-        assert reward == 0.0
+        assert -0.2 < reward < 0.0  # slight penalty, not catastrophic
 
 
 class TestProfitReward:
@@ -175,7 +180,7 @@ class TestEfficiencyReward:
         assert reward > 0.5
 
     def test_high_cost_low_efficiency(self):
-        state = _make_sim_state(total_cost=200, total_hours=24)
+        state = _make_sim_state(total_cost=200, total_hours=24, marginal_cost=2.5)
         reward = _calculate_reward(state, None, {"efficiency": 1.0})
         assert reward < 0.5
 
@@ -202,3 +207,60 @@ class TestCombinedWeights:
         for key in all_keys:
             reward = _calculate_reward(state, None, {key: 1.0})
             assert isinstance(reward, float), f"Key {key} returned non-float"
+
+
+class TestDeltaReward:
+    """Test delta-based reward improvements using prev_state."""
+
+    def test_wq_improvement_bonus(self):
+        """Improving water quality should give higher reward than staying flat."""
+        prev = _make_sim_state(wq_score=0.7)
+        curr_improving = _make_sim_state(wq_score=0.8)
+        curr_flat = _make_sim_state(wq_score=0.7)
+
+        r_improving = _calculate_reward(curr_improving, prev, {"water_quality": 1.0})
+        r_flat = _calculate_reward(curr_flat, prev, {"water_quality": 1.0})
+        assert r_improving > r_flat
+
+
+class TestDiseaseControlReward:
+    """Test disease control and treatment timing rewards."""
+
+    def test_disease_free_positive(self):
+        state = _make_sim_state()
+        state["disease"] = {"active": False}
+        reward = _calculate_reward(state, None, {"disease_control": 1.0})
+        assert reward > 0
+
+    def test_untreated_disease_negative(self):
+        state = _make_sim_state()
+        state["disease"] = {"active": True, "severity": 0.6, "treatment_active": False}
+        reward = _calculate_reward(state, None, {"disease_control": 1.0})
+        assert reward < 0
+
+    def test_treated_disease_less_penalty(self):
+        """Treating disease should reduce the penalty vs not treating."""
+        state_treated = _make_sim_state()
+        state_treated["disease"] = {"active": True, "severity": 0.6, "treatment_active": True}
+        state_untreated = _make_sim_state()
+        state_untreated["disease"] = {"active": True, "severity": 0.6, "treatment_active": False}
+
+        r_treated = _calculate_reward(state_treated, None, {"disease_control": 1.0})
+        r_untreated = _calculate_reward(state_untreated, None, {"disease_control": 1.0})
+        assert r_treated > r_untreated
+
+
+class TestHarvestTimingReward:
+    """Test harvest timing rewards."""
+
+    def test_harvest_at_market_weight_best(self):
+        state = _make_sim_state(weight=550.0)
+        state["harvested"] = True
+        reward = _calculate_reward(state, None, {"timing": 1.0})
+        assert reward >= 0.6
+
+    def test_no_harvest_zero(self):
+        state = _make_sim_state(weight=550.0)
+        state["harvested"] = False
+        reward = _calculate_reward(state, None, {"timing": 1.0})
+        assert reward == 0.0
