@@ -19,7 +19,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rewards import CompositeReward, SurvivalReward, WaterQualityReward
+from rewards import CompositeReward
 
 
 SYSTEM_PROMPT = """You are an expert Nile Tilapia aquaculture manager. Given the current state of a 100m³ RAS fish farm, decide the next hour's actions.

@@ -18,15 +18,13 @@ Usage:
 """
 
 import argparse
-import json
 import os
-import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from src.agentic_rl.server.environment import FishFarmEnvironment
 from src.agentic_rl.models import FarmAction
-from src.agentic_rl.tasks import TASKS, list_all_tasks
+from src.agentic_rl.tasks import list_all_tasks
 from inference import (
     heuristic_action,
     build_observation_prompt,
@@ -233,10 +231,6 @@ def main():
 
     # Time budget: 18 min total
     total_budget_s = 18 * 60
-    total_hours = sum(
-        next(t["episode_hours"] for t in list_all_tasks() if t["task_id"] == tid)
-        for tid in task_ids
-    )
 
     results = []
     total_start = time.time()
@@ -262,7 +256,7 @@ def main():
 
     # Summary
     print(f"\n{'='*60}")
-    print(f"  SUMMARY")
+    print("  SUMMARY")
     print(f"{'='*60}")
     avg_score = sum(r["score"] for r in results) / len(results) if results else 0
     total_llm = sum(r["llm_calls"] for r in results)

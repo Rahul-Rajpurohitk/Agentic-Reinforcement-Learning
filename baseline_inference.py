@@ -1,184 +1,94 @@
-"""Baseline inference script for the Code Review environment.
+"""Baseline inference script for the Fish Farm environment.
 
-Runs an LLM (via OpenAI-compatible API) against all tasks and reports
-reproducible baseline scores. This is a required submission artifact.
+Runs the heuristic agent against all 12 tasks and reports reproducible
+baseline scores. This is a required submission artifact that demonstrates
+the graders produce meaningful, varying signal across difficulty levels.
 
 Usage:
-    # Start the environment server first:
-    uvicorn src.agentic_rl.server.app:app --port 8000
-
-    # Run baseline (requires OPENAI_API_KEY env var):
+    # Heuristic baseline (no API key needed, no server needed)
     python baseline_inference.py
 
-    # Or specify a different model/base URL:
-    python baseline_inference.py --model gpt-4o-mini --base-url http://localhost:8000
+    # Save results to file
+    python baseline_inference.py --output baseline_results.json
+
+    # Single task
+    python baseline_inference.py --task feeding_basics
 """
 
 import argparse
 import json
-import os
-import sys
 import time
 
-try:
-    from openai import OpenAI
-except ImportError:
-    print("ERROR: openai package not installed. Run: pip install openai")
-    sys.exit(1)
-
-try:
-    import httpx
-except ImportError:
-    print("ERROR: httpx package not installed. Run: pip install httpx")
-    sys.exit(1)
+from src.agentic_rl.server.environment import FishFarmEnvironment
+from src.agentic_rl.models import FarmAction
+from src.agentic_rl.tasks import list_all_tasks
+from inference import heuristic_action
 
 
-SYSTEM_PROMPT = """You are an expert code reviewer. You will be given a code snippet and must identify all bugs, logic errors, security vulnerabilities, and style issues.
+def run_baseline(task_ids=None, output_file=None):
+    """Run heuristic baseline on all tasks and report scores."""
+    all_tasks = list_all_tasks()
+    all_tasks.sort(key=lambda t: t["episode_hours"])
 
-For each issue you find, provide:
-- line: the line number where the issue occurs
-- severity: "critical", "major", or "minor"
-- category: "bug", "security", "style", "performance", or "logic"
-- description: a clear explanation of what's wrong
-- suggestion: how to fix it
-
-Also provide an overall_assessment: "approve", "request_changes", or "comment".
-
-Respond ONLY with valid JSON in this exact format:
-{
-  "issues_found": [
-    {
-      "line": "5",
-      "severity": "critical",
-      "category": "bug",
-      "description": "Description of the issue",
-      "suggestion": "How to fix it"
-    }
-  ],
-  "overall_assessment": "request_changes",
-  "confidence": 0.9
-}"""
-
-
-def call_llm(client: OpenAI, model: str, code: str, context: str) -> dict:
-    """Send code to LLM for review and parse the response."""
-    user_message = f"""Review this code for bugs, logic errors, and security vulnerabilities.
-
-Context: {context}
-
-```python
-{code}
-```
-
-Respond with JSON only."""
-
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        temperature=0.0,  # Deterministic for reproducibility
-        max_tokens=2000,
-    )
-
-    content = response.choices[0].message.content.strip()
-
-    # Extract JSON from potential markdown code blocks
-    if "```json" in content:
-        content = content.split("```json")[1].split("```")[0].strip()
-    elif "```" in content:
-        content = content.split("```")[1].split("```")[0].strip()
-
-    return json.loads(content)
-
-
-def run_baseline(env_url: str, model: str, openai_base_url: str = None):
-    """Run baseline inference on all tasks and report scores."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("ERROR: OPENAI_API_KEY environment variable not set.")
-        print("Set it with: export OPENAI_API_KEY=your_key_here")
-        sys.exit(1)
-
-    # Initialize clients
-    llm_kwargs = {"api_key": api_key}
-    if openai_base_url:
-        llm_kwargs["base_url"] = openai_base_url
-    llm_client = OpenAI(**llm_kwargs)
-    env_client = httpx.Client(base_url=env_url, timeout=30.0)
-
-    # Get all tasks
-    tasks_resp = env_client.get("/tasks")
-    tasks_resp.raise_for_status()
-    all_tasks = tasks_resp.json()["tasks"]
+    if task_ids:
+        all_tasks = [t for t in all_tasks if t["task_id"] in task_ids]
 
     print(f"{'='*60}")
-    print(f"Baseline Inference — Code Review Environment")
-    print(f"Model: {model}")
-    print(f"Environment: {env_url}")
+    print("Baseline Inference — Fish Farm Environment")
+    print("Agent: Heuristic (rule-based, deterministic)")
     print(f"Tasks: {len(all_tasks)}")
     print(f"{'='*60}\n")
 
     results = []
+    total_start = time.time()
 
     for task_info in all_tasks:
         task_id = task_info["task_id"]
-        difficulty = task_info["difficulty"]
+        max_hours = task_info["episode_hours"]
 
-        print(f"--- Task: {task_id} ({difficulty}) ---")
+        print(f"--- {task_id} ({task_info['difficulty']}, {max_hours}h) ---")
 
-        # Reset environment
-        reset_resp = env_client.post("/reset", json={"task_id": task_id})
-        reset_resp.raise_for_status()
-        obs = reset_resp.json()
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id=task_id, seed=42)
+        obs_dict = obs.model_dump()
 
-        code = obs["code_snippet"]
-        context = obs["context"]
+        steps = 0
+        while not obs_dict.get("done", False) and steps < max_hours:
+            action_dict = heuristic_action(obs_dict, task_id, steps, max_hours)
+            action = FarmAction(**action_dict)
+            obs = env.step(action)
+            obs_dict = obs.model_dump()
+            steps += 1
 
-        # Get LLM review
-        try:
-            review = call_llm(llm_client, model, code, context)
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"  LLM Error: {e}")
-            review = {
-                "issues_found": [],
-                "overall_assessment": "comment",
-                "confidence": 0.0,
-            }
+        score = obs_dict.get("reward", 0) or 0
 
-        # Submit to environment
-        step_resp = env_client.post("/step", json=review)
-        step_resp.raise_for_status()
-        result = step_resp.json()
-
-        score = result["reward"]
-        feedback = result["feedback"]
-
-        print(f"  Score: {score:.3f}")
-        print(f"  Feedback: {feedback}")
-        print(f"  Issues reported: {len(review.get('issues_found', []))}")
-        print()
+        print(f"  Score: {score:.3f}  |  Weight: {obs_dict.get('avg_fish_weight', 0):.0f}g  "
+              f"|  Pop: {obs_dict.get('population', 0)}  "
+              f"|  Profit: ${obs_dict.get('current_profit', 0):.0f}")
 
         results.append({
             "task_id": task_id,
-            "difficulty": difficulty,
+            "difficulty": task_info["difficulty"],
             "score": score,
-            "issues_found": len(review.get("issues_found", [])),
-            "feedback": feedback,
+            "steps": steps,
+            "final_weight": obs_dict.get("avg_fish_weight", 0),
+            "final_population": obs_dict.get("population", 0),
+            "final_profit": obs_dict.get("current_profit", 0),
         })
 
+    total_elapsed = time.time() - total_start
+
     # Summary
-    print(f"{'='*60}")
+    print(f"\n{'='*60}")
     print("BASELINE RESULTS SUMMARY")
     print(f"{'='*60}")
 
-    by_difficulty = {"easy": [], "medium": [], "hard": []}
+    by_difficulty = {"easy": [], "medium": [], "hard": [], "extreme": []}
     for r in results:
         by_difficulty[r["difficulty"]].append(r["score"])
 
     total_scores = []
-    for difficulty in ["easy", "medium", "hard"]:
+    for difficulty in ["easy", "medium", "hard", "extreme"]:
         scores = by_difficulty[difficulty]
         if scores:
             avg = sum(scores) / len(scores)
@@ -187,39 +97,40 @@ def run_baseline(env_url: str, model: str, openai_base_url: str = None):
 
     overall_avg = sum(total_scores) / len(total_scores) if total_scores else 0.0
     print(f"  {'OVERALL':8s}: {overall_avg:.3f} avg ({len(total_scores)} tasks)")
+    print(f"  Time: {total_elapsed:.1f}s")
     print(f"{'='*60}")
 
     # Save results
     output = {
-        "model": model,
-        "environment": env_url,
+        "agent": "heuristic",
+        "seed": 42,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "results": results,
         "summary": {
-            "overall_avg": overall_avg,
+            "overall_avg": round(overall_avg, 3),
+            "total_tasks": len(results),
+            "elapsed_s": round(total_elapsed, 1),
             "by_difficulty": {
-                k: sum(v) / len(v) if v else 0.0
+                k: round(sum(v) / len(v), 3) if v else 0.0
                 for k, v in by_difficulty.items()
             },
         },
     }
 
-    with open("baseline_results.json", "w") as f:
-        json.dump(output, f, indent=2)
+    if output_file:
+        with open(output_file, "w") as f:
+            json.dump(output, f, indent=2)
+        print(f"\nResults saved to {output_file}")
 
-    print(f"\nResults saved to baseline_results.json")
     return output
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run baseline inference")
-    parser.add_argument("--model", default="gpt-4o-mini", help="Model name")
-    parser.add_argument("--base-url", default="http://localhost:8000", help="Env server URL")
-    parser.add_argument("--openai-base-url", default=None, help="OpenAI API base URL")
+    parser = argparse.ArgumentParser(description="Fish Farm Baseline Inference")
+    parser.add_argument("--task", type=str, nargs="+", default=None,
+                        help="Specific task(s) to run")
+    parser.add_argument("--output", type=str, default="baseline_results.json",
+                        help="Output file (default: baseline_results.json)")
     args = parser.parse_args()
 
-    run_baseline(
-        env_url=args.base_url,
-        model=args.model,
-        openai_base_url=args.openai_base_url,
-    )
+    run_baseline(task_ids=args.task, output_file=args.output)

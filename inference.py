@@ -24,8 +24,7 @@ import json
 import os
 import time
 import re
-import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 from openai import OpenAI
@@ -174,7 +173,6 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     nighttime_do_risk = obs.get("nighttime_do_risk", 0.0)
     feed_price = obs.get("feed_price_per_kg", 0.50)
     hours_left = max_hours - step
-    wq_score = obs.get("water_quality_score", 0.8)
 
     # ---- Aeration (proactive nighttime crash prevention) ----
     algae_bloom = obs.get("algae_bloom", False)
@@ -787,7 +785,7 @@ async def async_main():
 
     # Summary
     print(f"\n{'='*60}")
-    print(f"  SUMMARY")
+    print("  SUMMARY")
     print(f"{'='*60}")
     avg_score = sum(r["final_reward"] for r in results) / len(results) if results else 0
     total_llm = sum(r["llm_calls"] for r in results)
