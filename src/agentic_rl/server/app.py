@@ -67,10 +67,63 @@ def endpoint_grade(req: GraderRequest):
     except ValueError:
         raise HTTPException(status_code=404, detail=f"Unknown task_id: {req.task_id}")
 
+    # Convert flat observation format to nested simulator state if needed
+    state = req.final_state
+    if "fish" not in state and "avg_fish_weight" in state:
+        state = {
+            "fish": {
+                "weight_g": state.get("avg_fish_weight", 50),
+                "population": state.get("population", 10000),
+                "mortality_today": state.get("mortality_today", 0),
+                "cumulative_mortality": state.get("cumulative_mortality", 0),
+                "survival_rate": state.get("survival_rate", 1.0),
+                "stress_level": state.get("stress_level", 0.0),
+                "feeding_response": state.get("feeding_response", "normal"),
+                "biomass_kg": state.get("biomass_kg", 0),
+                "growth_rate_g_day": state.get("growth_rate_g_day", 0),
+                "fcr": state.get("fcr", 0),
+                "sgr": state.get("sgr", 0),
+                "stocking_density": state.get("stocking_density", 0),
+            },
+            "water": {
+                "temperature": state.get("temperature", 28),
+                "DO": state.get("dissolved_oxygen", 7),
+                "pH": state.get("ph", 7.5),
+                "TAN": state.get("ammonia", 0.1),
+                "UIA": state.get("ammonia_toxic", 0.005),
+                "NO2": state.get("nitrite", 0.05),
+                "NO3": state.get("nitrate", 5),
+                "water_quality_score": state.get("water_quality_score", 0.9),
+                "algae_bloom": state.get("algae_bloom", False),
+                "nighttime_do_risk": state.get("nighttime_do_risk", 0),
+            },
+            "economics": {
+                "fish_value": state.get("current_fish_value", 0),
+                "total_cost": state.get("total_cost_so_far", 0),
+                "current_profit": state.get("current_profit", 0),
+                "feed_price_per_kg": state.get("feed_price_per_kg", 0.5),
+                "market_price_multiplier": state.get("market_price_multiplier", 1.0),
+                "feed_inventory_kg": state.get("feed_remaining_kg", 500),
+                "cost_breakdown": {},
+            },
+            "disease": {
+                "active": state.get("disease_suspected", False),
+                "infected": 0,
+                "recovered": 0,
+            },
+            "time": {
+                "day": state.get("day_in_cycle", 0),
+                "hour": state.get("time_of_day", 0),
+                "day_of_year": state.get("day_of_year", 90),
+            },
+            "done": state.get("done", True),
+            "harvested": state.get("harvested", False),
+        }
+
     grader = FarmGrader()
     result = grader.grade(
         task_id=req.task_id,
-        final_state=req.final_state,
+        final_state=state,
         episode_history=req.episode_history,
         task_config=task,
     )

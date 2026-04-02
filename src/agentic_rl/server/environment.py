@@ -211,6 +211,10 @@ class FishFarmEnvironment(Environment[FarmAction, FarmObservation, FarmState]):
         **kwargs: Any,
     ) -> FarmObservation:
         """Process the agent's action and advance simulation by 1 hour."""
+        # Auto-reset if step is called without prior reset (stateless REST API)
+        if not self._task_config:
+            self.reset(task_id="feeding_basics")
+
         if self._state.is_complete:
             return self._terminal_observation()
 
