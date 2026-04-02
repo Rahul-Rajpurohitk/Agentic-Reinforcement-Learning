@@ -3,7 +3,8 @@ import pytest
 from agentic_rl.tasks import TASKS, list_all_tasks, get_task
 from agentic_rl.engine.simulator import FishFarmSimulator
 
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from graders.farm_graders import FarmGrader
 

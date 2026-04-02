@@ -1,8 +1,6 @@
 """Tests for water quality dynamics engine."""
-import pytest
-import math
 from agentic_rl.engine.water_quality import WaterQualityEngine
-from agentic_rl.constants import WATER, TILAPIA, SYSTEM, do_saturation
+from agentic_rl.constants import SYSTEM
 
 
 class TestDODynamics:

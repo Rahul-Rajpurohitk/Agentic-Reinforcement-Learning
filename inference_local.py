@@ -42,15 +42,34 @@ MAX_HISTORY = 8
 
 
 def get_llm_client():
-    """Create OpenAI-compatible client if API key is available."""
+    """Create LLM client. Tries OpenAI API, falls back to HF InferenceClient."""
     api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
+
+    # Try OpenAI-compatible endpoint first
     try:
         from openai import OpenAI
-        return OpenAI(base_url=API_BASE_URL, api_key=api_key)
-    except ImportError:
-        print("  openai package not installed, using heuristic only")
+        client = OpenAI(base_url=API_BASE_URL, api_key=api_key)
+        client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=5,
+        )
+        print(f"  LLM: OpenAI-compatible ({API_BASE_URL})")
+        return client
+    except Exception as e:
+        print(f"  OpenAI API failed ({e}), trying HuggingFace InferenceClient...")
+
+    # Fallback: HuggingFace InferenceClient
+    try:
+        from inference import HFInferenceWrapper
+        wrapper = HFInferenceWrapper(model=MODEL_NAME, token=api_key)
+        wrapper.create(messages=[{"role": "user", "content": "test"}], max_tokens=5)
+        print(f"  LLM: HuggingFace InferenceClient ({MODEL_NAME})")
+        return wrapper
+    except Exception as e2:
+        print(f"  HF InferenceClient also failed ({e2}). Using heuristic only.")
         return None
 
 

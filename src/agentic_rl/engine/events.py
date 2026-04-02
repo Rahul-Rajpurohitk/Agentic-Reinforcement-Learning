@@ -17,7 +17,7 @@ The event system is the primary mechanism for creating multi-crisis scenarios
 that test the agent's ability to manage compound failures.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 

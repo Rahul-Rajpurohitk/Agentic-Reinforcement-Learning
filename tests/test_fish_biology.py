@@ -1,6 +1,5 @@
-import pytest
 from agentic_rl.engine.fish_biology import FishBiologyEngine
-from agentic_rl.constants import TILAPIA, WATER
+from agentic_rl.constants import TILAPIA
 
 
 class TestGrowthModel:

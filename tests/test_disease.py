@@ -1,5 +1,4 @@
 """Tests for the SEIR disease model engine."""
-import pytest
 from agentic_rl.engine.disease import DiseaseEngine
 from agentic_rl.constants import DISEASE
 

@@ -93,7 +93,7 @@ class TestReset:
         assert self.env.state.is_complete is False
 
     def test_reset_accepts_seed_and_episode_id(self):
-        obs = self.env.reset(seed=42, episode_id="test-ep-123", task_id="feeding_basics")
+        self.env.reset(seed=42, episode_id="test-ep-123", task_id="feeding_basics")
         assert self.env.state.episode_id == "test-ep-123"
 
     def test_reset_invalid_task_raises(self):

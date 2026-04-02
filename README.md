@@ -11,6 +11,8 @@ base_path: /web
 
 # Fish Farm RL Environment
 
+[![CI](https://github.com/Rahul-Rajpurohitk/Agentic-Reinforcement-Learning/actions/workflows/ci.yml/badge.svg)](https://github.com/Rahul-Rajpurohitk/Agentic-Reinforcement-Learning/actions/workflows/ci.yml)
+
 **The world's first OpenEnv-compatible aquaculture farming environment**
 
 An AI agent manages a Nile Tilapia Recirculating Aquaculture System (RAS) — making hourly decisions about feeding, aeration, temperature control, water exchange, disease treatment, and harvest timing. Built on real aquaculture science: bioenergetic growth models, coupled DO/ammonia/pH dynamics, SEIR disease epidemiology, stochastic economics, and realistic multi-objective trade-offs.
@@ -177,10 +179,19 @@ docker run -p 8000:8000 fish-farm-env
 ### Run Inference
 
 ```bash
+# Option 1: OpenAI-compatible API
 export API_BASE_URL=https://api.openai.com/v1
 export MODEL_NAME=gpt-4o
 export OPENAI_API_KEY=your_key
 python inference.py
+
+# Option 2: HuggingFace Inference (auto-fallback)
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+export HF_TOKEN=hf_xxx
+python inference_local.py
+
+# Option 3: Heuristic only (no API key needed)
+python inference_local.py --heuristic-only
 ```
 
 ---
@@ -227,6 +238,12 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
+├── rewards/
+│   ├── base_reward.py        # BaseReward interface
+│   └── example_rewards.py    # 5 reward functions (survival, WQ, growth, profit, composite)
+├── training/
+│   └── train_grpo.py         # GRPO fine-tuning template (requires GPU)
+├── .github/workflows/ci.yml  # CI: tests + lint + Docker + OpenEnv validate
 ├── tests/                    # 304 tests (2.0s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
@@ -241,6 +258,30 @@ python inference.py
 └── docs/
     └── knowledge-base/       # 4,400+ lines of aquaculture research (40+ citations)
 ```
+
+---
+
+## Heuristic Agent Scores
+
+The built-in heuristic agent (rule-based, no LLM needed) scores well across all 12 tasks, demonstrating that the graders produce meaningful signal:
+
+| Task | Difficulty | Score | Strategy |
+|------|-----------|-------|----------|
+| `oxygen_management` | Easy | **1.000** | Proactive aeration, nighttime DO crash prevention |
+| `disease_outbreak` | Medium | **0.990** | Early vaccination before disease onset |
+| `storm_response` | Hard | **0.981** | Pre-storm DO supersaturation + minimal feeding during outage |
+| `ammonia_crisis` | Medium | **0.900** | Aggressive water exchange + feeding reduction |
+| `catastrophe_prevention` | Extreme | **0.891** | Immediate harvest before compound crises cascade |
+| `feeding_basics` | Easy | **0.857** | Growth-stage feeding with size-dependent rates |
+| `growth_optimization` | Medium | **0.842** | FCR optimization via feeding strategy |
+| `water_quality_balance` | Easy | **0.839** | Balanced aeration + exchange with cost awareness |
+| `multi_objective` | Hard | **0.702** | Early harvest to lock in positive profit |
+| `temperature_stress` | Medium | **0.703** | Active cooling + reduced metabolic load |
+| `full_growout` | Hard | **0.446** | Cost management over 60-day cycle |
+| `season_management` | Extreme | **0.362** | Feed conservation + end-of-season harvest |
+| **Average** | | **0.793** | |
+
+The hard/extreme tasks have lower scores by design — they present genuinely difficult optimization challenges where an LLM agent with multi-step reasoning should outperform simple heuristics.
 
 ---
 

@@ -1,6 +1,4 @@
 """Tests for the economic model engine."""
-import pytest
-import math
 from agentic_rl.engine.economics import EconomicsEngine
 from agentic_rl.constants import ECONOMICS, DISEASE
 

@@ -1,10 +1,11 @@
-"""Base reward function interface for the Code Review environment.
+"""Base reward function interface for the Fish Farm environment.
 
-Reward functions score agent completions during GRPO training.
+Reward functions provide shaping signals for GRPO training.
+They score agent actions against the current farm state.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict
 
 
 class BaseReward(ABC):
@@ -13,18 +14,20 @@ class BaseReward(ABC):
     @abstractmethod
     def compute(
         self,
-        issues_found: List[Dict[str, str]],
-        ground_truth: List[Dict[str, str]],
+        state: Dict[str, Any],
+        action: Dict[str, Any],
+        prev_state: Dict[str, Any],
         **kwargs,
     ) -> float:
-        """Compute reward for a code review.
+        """Compute reward for a farm management action.
 
         Args:
-            issues_found: Issues reported by the agent.
-            ground_truth: Actual issues in the code.
+            state: Current farm state after action.
+            action: The action that was taken.
+            prev_state: Farm state before the action.
 
         Returns:
-            Float reward in [0.0, 1.0].
+            Float reward (can be negative for penalties).
         """
         ...
 

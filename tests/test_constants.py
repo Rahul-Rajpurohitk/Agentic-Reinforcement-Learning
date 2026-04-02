@@ -1,8 +1,6 @@
 """Tests for constants module — utility functions and parameter sanity."""
-import pytest
-import math
 from agentic_rl.constants import (
-    TILAPIA, WATER, DISEASE, ECONOMICS, SYSTEM,
+    TILAPIA, WATER, ECONOMICS, SYSTEM,
     uia_fraction, do_saturation, photoperiod_hours,
     temperature_factor, do_factor, uia_factor,
 )

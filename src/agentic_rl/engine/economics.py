@@ -19,7 +19,7 @@ mortality losses, disposal).
 """
 
 import math
-from ..constants import ECONOMICS, DISEASE, TILAPIA
+from ..constants import ECONOMICS, DISEASE
 
 
 class EconomicsEngine:

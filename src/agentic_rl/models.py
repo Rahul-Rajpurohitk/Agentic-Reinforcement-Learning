@@ -5,7 +5,7 @@ FarmObservation: What the agent sees (partial observability — no ground truth 
 FarmState: Full internal state (for grading)
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from openenv.core.env_server import Action, Observation, State
 from pydantic import Field
 

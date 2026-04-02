@@ -1,5 +1,4 @@
 """Integration tests for the full simulator."""
-import pytest
 from agentic_rl.engine.simulator import FishFarmSimulator
 
 
@@ -154,7 +153,6 @@ class TestObservationCompleteness:
     def test_observation_has_fish_growth_fields(self):
         """Observation should include FCR, SGR, growth rate, stocking density."""
         from agentic_rl.server.environment import FishFarmEnvironment
-        from agentic_rl.models import FarmAction
         env = FishFarmEnvironment()
         obs = env.reset(task_id="feeding_basics")
         assert hasattr(obs, "fcr")
@@ -167,7 +165,7 @@ class TestObservationCompleteness:
         from agentic_rl.server.environment import FishFarmEnvironment
         from agentic_rl.models import FarmAction
         env = FishFarmEnvironment()
-        obs = env.reset(task_id="feeding_basics")
+        env.reset(task_id="feeding_basics")
         step_obs = env.step(FarmAction(feeding_rate=0.5, aeration_rate=0.5))
         assert hasattr(step_obs, "feed_price_per_kg")
         assert hasattr(step_obs, "market_price_multiplier")
@@ -178,7 +176,6 @@ class TestObservationCompleteness:
     def test_observation_has_weather_fields(self):
         """Observation should include daytime, storm, humidity."""
         from agentic_rl.server.environment import FishFarmEnvironment
-        from agentic_rl.models import FarmAction
         env = FishFarmEnvironment()
         obs = env.reset(task_id="feeding_basics")
         assert hasattr(obs, "is_daytime")
@@ -403,7 +400,7 @@ class TestVaccinationProphylaxis:
         sim.reset()
         assert sim.disease.is_active is False
         initial_susceptible = sim.disease.susceptible
-        state = sim.step(0.5, 0.5, 0.0, 0.02, False, "vaccination")
+        sim.step(0.5, 0.5, 0.0, 0.02, False, "vaccination")
         # 80% of susceptible should be vaccinated (moved to recovered)
         assert sim.disease.recovered > 0
         assert sim.disease.susceptible < initial_susceptible

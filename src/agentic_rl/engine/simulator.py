@@ -29,7 +29,7 @@ from .disease import DiseaseEngine
 from .economics import EconomicsEngine
 from .weather import WeatherEngine
 from .events import EventScheduler, Event
-from ..constants import SYSTEM, TILAPIA, WATER, ECONOMICS as ECON_CONST
+from ..constants import SYSTEM, TILAPIA, WATER
 
 
 class FishFarmSimulator:

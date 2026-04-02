@@ -41,12 +41,55 @@ MAX_HISTORY = 8  # recent observations to include in prompt
 
 # ---- LLM Client ----
 
-def get_llm_client() -> OpenAI:
-    """Create OpenAI-compatible client."""
-    return OpenAI(
-        base_url=API_BASE_URL,
-        api_key=HF_TOKEN or os.getenv("OPENAI_API_KEY", "dummy"),
-    )
+class HFInferenceWrapper:
+    """Wraps HuggingFace InferenceClient to match OpenAI client interface."""
+
+    def __init__(self, model: str, token: str):
+        from huggingface_hub import InferenceClient
+        self.client = InferenceClient(model=model, token=token)
+        self.chat = self
+        self.completions = self
+
+    def create(self, model=None, messages=None, temperature=0.2, max_tokens=200, **kwargs):
+        return self.client.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+
+def get_llm_client():
+    """Create LLM client. Tries OpenAI-compatible API first, falls back to HF InferenceClient."""
+    api_key = HF_TOKEN or os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        print("  WARNING: No API key set (HF_TOKEN or OPENAI_API_KEY). Using heuristic only.")
+        return None
+
+    # Try OpenAI-compatible endpoint first
+    try:
+        client = OpenAI(base_url=API_BASE_URL, api_key=api_key)
+        client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=5,
+        )
+        print(f"  LLM: OpenAI-compatible ({API_BASE_URL})")
+        return client
+    except Exception as e:
+        print(f"  OpenAI API failed ({e}), trying HuggingFace InferenceClient...")
+
+    # Fallback: HuggingFace InferenceClient (uses HF's serverless inference)
+    try:
+        wrapper = HFInferenceWrapper(model=MODEL_NAME, token=api_key)
+        wrapper.create(
+            messages=[{"role": "user", "content": "test"}],
+            max_tokens=5,
+        )
+        print(f"  LLM: HuggingFace InferenceClient ({MODEL_NAME})")
+        return wrapper
+    except Exception as e2:
+        print(f"  HF InferenceClient also failed ({e2}). Using heuristic only.")
+        return None
 
 
 # ---- Expert System Prompt ----
