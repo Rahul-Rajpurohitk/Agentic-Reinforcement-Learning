@@ -149,7 +149,7 @@ cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
 pip install -e .
 
-# Run tests (276 tests)
+# Run tests (288 tests)
 pytest tests/ -v
 
 # Start environment server
@@ -200,7 +200,7 @@ python inference.py
 │   ├── constants.py          # All biological/physical/economic constants (frozen dataclasses)
 │   ├── models.py             # FarmAction (6 controls), FarmObservation (30+ fields), FarmState
 │   ├── tasks.py              # 12 task scenarios (easy → extreme)
-│   ├── rewards.py            # Task-weighted reward function (10 component keys)
+│   ├── rewards.py            # Task-weighted reward function (10 component keys) + growth-stage scaling
 │   ├── engine/
 │   │   ├── water_quality.py  # DO mass balance, nitrification, denitrification, evaporation, photosynthesis
 │   │   ├── fish_biology.py   # Bioenergetic growth, dual respiration, stress, mortality
@@ -215,7 +215,7 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
-├── tests/                    # 276 tests (2.3s)
+├── tests/                    # 288 tests (2.1s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
 │   ├── test_disease.py       # SEIR dynamics, treatments, vaccination, immunity, temperature
@@ -223,7 +223,7 @@ python inference.py
 │   ├── test_simulator.py     # Integration, observations, heuristic, stochastic growth, nighttime DO risk, vaccination prophylaxis, cost breakdown, harvest revenue
 │   ├── test_constants.py     # Parameter sanity, utility functions (32 tests)
 │   ├── test_tasks_grader.py  # Task definitions, all 12 graders
-│   ├── test_rewards.py       # All reward component keys, delta rewards, disease/harvest, nighttime DO risk
+│   ├── test_rewards.py       # All reward component keys, delta rewards, disease/harvest, nighttime DO risk, growth-stage scaling
 │   ├── test_models.py        # Action/Observation/State model validation
 │   └── test_endpoints.py     # /tasks, /grader, /baseline API endpoints
 └── docs/

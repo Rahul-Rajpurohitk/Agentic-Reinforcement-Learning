@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Import from standalone rewards module (no openenv dependency)
 from agentic_rl.rewards import calculate_reward as _calculate_reward
+from agentic_rl.rewards import growth_stage_scale
 
 
 def _make_sim_state(growth_rate=2.0, mortality=0, survival=0.98, stress=0.1,
@@ -295,3 +296,77 @@ class TestNighttimeDORiskReward:
         r_better = _calculate_reward(curr_better, prev, {"do_risk": 1.0})
         r_worse = _calculate_reward(curr_worse, prev, {"do_risk": 1.0})
         assert r_better > r_worse
+
+
+class TestGrowthStageScale:
+    """Test growth-stage-aware reward weight scaling (KB-03 Sec 10.1)."""
+
+    def test_juvenile_boosts_water_quality(self):
+        """Juvenile (<50g) should boost water_quality weight by 30%."""
+        weights = {"water_quality": 1.0, "growth": 1.0}
+        scaled = growth_stage_scale(30.0, weights)
+        assert scaled["water_quality"] == 1.3
+        assert scaled["growth"] == 0.8
+
+    def test_juvenile_boosts_survival(self):
+        weights = {"survival": 1.0}
+        scaled = growth_stage_scale(20.0, weights)
+        assert scaled["survival"] == 1.2
+
+    def test_juvenile_do_stability_key(self):
+        """do_stability key should also get juvenile boost."""
+        weights = {"do_stability": 1.0}
+        scaled = growth_stage_scale(10.0, weights)
+        assert scaled["do_stability"] == 1.3
+
+    def test_growout_boosts_fcr_and_efficiency(self):
+        """Grow-out (50-300g) should boost fcr and efficiency by 20%."""
+        weights = {"fcr": 1.0, "efficiency": 1.0, "growth": 1.0}
+        scaled = growth_stage_scale(150.0, weights)
+        assert scaled["fcr"] == 1.2
+        assert scaled["efficiency"] == 1.2
+        assert scaled["growth"] == 1.0  # unchanged in grow-out
+
+    def test_preharvest_boosts_profit_and_timing(self):
+        """Pre-harvest (>300g) should boost profit 30% and timing 50%."""
+        weights = {"profit": 1.0, "timing": 1.0}
+        scaled = growth_stage_scale(400.0, weights)
+        assert scaled["profit"] == 1.3
+        assert scaled["timing"] == 1.5
+
+    def test_preharvest_roi_boost(self):
+        weights = {"roi": 1.0}
+        scaled = growth_stage_scale(350.0, weights)
+        assert scaled["roi"] == 1.3
+
+    def test_missing_keys_no_error(self):
+        """Scaling should not crash if keys are absent."""
+        weights = {"growth": 1.0}
+        scaled = growth_stage_scale(30.0, weights)
+        assert scaled["growth"] == 0.8
+        assert "water_quality" not in scaled
+
+    def test_does_not_mutate_original(self):
+        """growth_stage_scale must not modify the input dict."""
+        weights = {"water_quality": 1.0, "growth": 1.0}
+        original_wq = weights["water_quality"]
+        growth_stage_scale(30.0, weights)
+        assert weights["water_quality"] == original_wq
+
+    def test_integration_juvenile_higher_wq_reward(self):
+        """Juvenile fish should get higher water quality reward due to scaling."""
+        state_juvenile = _make_sim_state(wq_score=0.9, weight=30.0)
+        state_adult = _make_sim_state(wq_score=0.9, weight=200.0)
+        weights = {"water_quality": 1.0}
+        r_juv = _calculate_reward(state_juvenile, None, dict(weights))
+        r_adult = _calculate_reward(state_adult, None, dict(weights))
+        assert r_juv > r_adult  # juvenile gets 1.3x boost
+
+    def test_integration_preharvest_higher_profit_reward(self):
+        """Pre-harvest fish should get higher profit reward due to scaling."""
+        state_small = _make_sim_state(profit=500, weight=100.0)
+        state_big = _make_sim_state(profit=500, weight=400.0)
+        weights = {"profit": 1.0}
+        r_small = _calculate_reward(state_small, None, dict(weights))
+        r_big = _calculate_reward(state_big, None, dict(weights))
+        assert r_big > r_small  # pre-harvest gets 1.3x boost

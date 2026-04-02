@@ -17,9 +17,54 @@ weights. Each weight key maps to a component of the simulation state:
   disease_control  — penalize active disease, reward disease-free
   treatment_timing — reward early treatment response
   timing           — bonus for strategic harvest
+  do_risk          — nighttime DO crash risk penalty
+
+Growth-stage-aware reward scaling (KB-03 Sec 10.1, Springer DDPG):
+  Juvenile (<50g):   water quality stability dominates
+  Grow-out (50-300g): feeding efficiency + growth dominate
+  Pre-harvest (>300g): profit + harvest timing dominate
 """
 
 from typing import Any, Dict, Optional
+
+
+def growth_stage_scale(weight_g: float, reward_weights: Dict[str, float]) -> Dict[str, float]:
+    """Apply growth-stage-dependent scaling to reward weights.
+
+    From KB-03 Sec 10.1 (Adaptive Multi-Objective RL):
+    - Juvenile (<50g): water quality +30%, growth -20%
+    - Grow-out (50-300g): fcr +20%, efficiency +20%
+    - Pre-harvest (>300g): profit +30%, timing +50%
+
+    Modifiers are multiplicative and small to preserve task designer intent.
+    Only applied if the key exists in reward_weights.
+    """
+    scaled = dict(reward_weights)
+
+    if weight_g < 50:
+        # Juvenile: prioritize stability and survival
+        for k in ("water_quality", "do_stability", "environment"):
+            if k in scaled:
+                scaled[k] *= 1.3
+        if "growth" in scaled:
+            scaled["growth"] *= 0.8
+        if "survival" in scaled:
+            scaled["survival"] *= 1.2
+    elif weight_g < 300:
+        # Grow-out: prioritize feeding efficiency
+        if "fcr" in scaled:
+            scaled["fcr"] *= 1.2
+        if "efficiency" in scaled:
+            scaled["efficiency"] *= 1.2
+    else:
+        # Pre-harvest: prioritize economics and harvest timing
+        for k in ("profit", "roi"):
+            if k in scaled:
+                scaled[k] *= 1.3
+        if "timing" in scaled:
+            scaled["timing"] *= 1.5
+
+    return scaled
 
 
 def calculate_reward(
@@ -44,6 +89,9 @@ def calculate_reward(
     fish = sim_state["fish"]
     water = sim_state["water"]
     econ = sim_state["economics"]
+
+    # Apply growth-stage-aware scaling (KB-03 Sec 10.1)
+    reward_weights = growth_stage_scale(fish["weight_g"], reward_weights)
 
     # ---- Growth reward ----
     # Normalized by 5 g/day (excellent tilapia growth rate).
