@@ -229,3 +229,93 @@ class TestBaselineEndpoint:
 
         # Not all equal
         assert len(set(round(s, 3) for s in scores.values())) > 1
+
+
+@pytest.mark.skipif(not HAS_OPENENV, reason="openenv-core not installed locally")
+class TestHeuristicEndToEnd:
+    """End-to-end: heuristic agent running through FishFarmEnvironment."""
+
+    def test_heuristic_beats_baseline_on_feeding(self):
+        """Heuristic agent should score well on feeding_basics."""
+        from inference import heuristic_action
+        from src.agentic_rl.server.environment import FishFarmEnvironment
+        from src.agentic_rl.models import FarmAction
+
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="feeding_basics")
+        obs_dict = obs.model_dump()
+
+        for step in range(168):
+            action_dict = heuristic_action(obs_dict, "feeding_basics", step, 168)
+            action = FarmAction(**action_dict)
+            obs = env.step(action)
+            obs_dict = obs.model_dump()
+            if obs.done:
+                break
+
+        final_score = obs.reward or 0
+        assert final_score > 0.5, f"Heuristic scored only {final_score:.3f} on feeding_basics"
+
+    def test_heuristic_on_oxygen_management(self):
+        """Heuristic should maintain DO on oxygen_management task."""
+        from inference import heuristic_action
+        from src.agentic_rl.server.environment import FishFarmEnvironment
+        from src.agentic_rl.models import FarmAction
+
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="oxygen_management")
+        obs_dict = obs.model_dump()
+
+        for step in range(72):
+            action_dict = heuristic_action(obs_dict, "oxygen_management", step, 72)
+            action = FarmAction(**action_dict)
+            obs = env.step(action)
+            obs_dict = obs.model_dump()
+            if obs.done:
+                break
+
+        final_score = obs.reward or 0
+        assert final_score >= 0.7, f"Heuristic scored {final_score:.3f} on oxygen_management"
+
+    def test_heuristic_on_ammonia_crisis(self):
+        """Heuristic should handle ammonia crisis with aggressive dilution."""
+        from inference import heuristic_action
+        from src.agentic_rl.server.environment import FishFarmEnvironment
+        from src.agentic_rl.models import FarmAction
+
+        env = FishFarmEnvironment()
+        obs = env.reset(task_id="ammonia_crisis")
+        obs_dict = obs.model_dump()
+
+        for step in range(72):
+            action_dict = heuristic_action(obs_dict, "ammonia_crisis", step, 72)
+            action = FarmAction(**action_dict)
+            obs = env.step(action)
+            obs_dict = obs.model_dump()
+            if obs.done:
+                break
+
+        final_score = obs.reward or 0
+        assert final_score >= 0.4, f"Heuristic scored {final_score:.3f} on ammonia_crisis"
+
+    def test_metadata_has_author(self):
+        """Metadata endpoint should return rich metadata."""
+        resp = client.get("/metadata")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "Fish Farm OpenEnv"
+        assert data["author"] == "Rahul Rajpurohit"
+        assert "Nile Tilapia" in data["description"]
+
+    def test_schema_endpoint_returns_all_schemas(self):
+        """Schema endpoint should return action, observation, and state schemas."""
+        resp = client.get("/schema")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "action" in data
+        assert "observation" in data
+        assert "state" in data
+        # Action schema should have our 6 controls
+        props = data["action"].get("properties", {})
+        assert "feeding_rate" in props
+        assert "treatment" in props
