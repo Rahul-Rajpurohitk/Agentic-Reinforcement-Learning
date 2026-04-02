@@ -58,7 +58,7 @@ def _make_tasks() -> Dict[str, Dict[str, Any]]:
                 "base_air_temp": 35.0,
             },
             "events": [],
-            "reward_weights": {"do_stability": 0.7, "efficiency": 0.3},
+            "reward_weights": {"do_stability": 0.5, "do_risk": 0.2, "efficiency": 0.3},
             "grader": "oxygen_grader",
         },
 

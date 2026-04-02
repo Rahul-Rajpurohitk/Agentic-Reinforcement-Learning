@@ -184,9 +184,14 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     elif not biofilter_ok and stress < 0.3:
         treatment = "probiotics"  # helps biofilter recover
 
-    # Vaccination: early prevention for long episodes
-    if hours_left > 30 * 24 and step < 48 and not disease_suspected and weight < 100:
-        treatment = "vaccination"
+    # Vaccination: prophylactic prevention for episodes with disease risk
+    # Works without active disease — moves 80% susceptible → recovered
+    # Best used early: long episodes, catastrophe (disease at hour 120), season mgmt
+    if not disease_suspected and treatment == "none":
+        if step < 48 and hours_left > 20 * 24:
+            treatment = "vaccination"  # early in long episodes
+        elif task_id == "catastrophe_prevention" and 96 <= step <= 108:
+            treatment = "vaccination"  # vaccinate before disease event at h120
 
     # ---- Harvest ----
     harvest = False

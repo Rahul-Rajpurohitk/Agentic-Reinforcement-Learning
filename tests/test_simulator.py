@@ -348,3 +348,80 @@ class TestNighttimeDORisk:
                "nighttime_do_risk": 0.8}
         action = heuristic_action(obs, "oxygen_management", 10, 72)
         assert action["aeration_rate"] >= 0.9  # should boost for high risk
+
+
+class TestVaccinationProphylaxis:
+    """Test that vaccination works as preventive measure (KB-03 Sec 4.2)."""
+
+    def test_vaccination_without_active_disease(self):
+        """Vaccination should work even when no disease is active."""
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        assert sim.disease.is_active is False
+        initial_susceptible = sim.disease.susceptible
+        state = sim.step(0.5, 0.5, 0.0, 0.02, False, "vaccination")
+        # 80% of susceptible should be vaccinated (moved to recovered)
+        assert sim.disease.recovered > 0
+        assert sim.disease.susceptible < initial_susceptible
+
+    def test_vaccination_cost_charged(self):
+        """Vaccination cost should be recorded even without active disease."""
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        sim.step(0.5, 0.5, 0.0, 0.02, False, "vaccination")
+        assert sim.economics.total_treatment_cost > 0
+
+    def test_antibiotics_blocked_without_disease(self):
+        """Non-vaccination treatments should NOT apply without active disease."""
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        sim.step(0.5, 0.5, 0.0, 0.02, False, "antibiotics")
+        assert sim.economics.total_treatment_cost == 0.0
+
+
+class TestCostBreakdown:
+    """Test that cost breakdown is exposed in state dict."""
+
+    def test_state_includes_cost_breakdown(self):
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        state = sim.step(0.5, 0.5, 0.0, 0.02, False, "none")
+        assert "cost_breakdown" in state["economics"]
+        breakdown = state["economics"]["cost_breakdown"]
+        assert "feed" in breakdown
+        assert "energy" in breakdown
+        assert "total" in breakdown
+
+    def test_cost_breakdown_components_sum(self):
+        sim = FishFarmSimulator(seed=42)
+        sim.reset()
+        for _ in range(24):
+            state = sim.step(0.5, 0.5, 0.0, 0.02, False, "none")
+        breakdown = state["economics"]["cost_breakdown"]
+        component_sum = sum(
+            v["amount"] for v in breakdown.values() if isinstance(v, dict)
+        )
+        assert abs(component_sum - breakdown["total"]) < 0.1
+
+
+class TestHarvestRevenue:
+    """Test weight-dependent harvest revenue."""
+
+    def test_harvest_revenue_uses_weight_premium(self):
+        """Harvest revenue should reflect weight-dependent pricing."""
+        from agentic_rl.engine.economics import EconomicsEngine
+        econ = EconomicsEngine()
+        econ.reset()
+        # Underweight fish should get less revenue than market-weight fish
+        rev_small = econ.calculate_harvest_revenue(100.0, avg_weight_g=100.0)
+        rev_large = econ.calculate_harvest_revenue(100.0, avg_weight_g=500.0)
+        assert rev_large > rev_small
+
+    def test_harvest_matches_fish_value(self):
+        """Harvest revenue should equal fish value (same pricing curve)."""
+        from agentic_rl.engine.economics import EconomicsEngine
+        econ = EconomicsEngine()
+        econ.reset()
+        value = econ.calculate_fish_value(200.0, avg_weight_g=350.0)
+        revenue = econ.calculate_harvest_revenue(200.0, avg_weight_g=350.0)
+        assert abs(value - revenue) < 0.01

@@ -42,8 +42,8 @@ An agent that feeds aggressively grows fish faster but risks catastrophic ammoni
 |--------|-------------|
 | **Water Quality** | 10 sub-steps/hour DO mass balance, two-stage nitrification (AOB + NOB), denitrification under anoxic conditions, Smith-Talling photosynthesis, Penman evaporation model, Beer-Lambert light attenuation, nighttime DO crash risk tracking |
 | **Fish Biology** | FAO bioenergetic growth ODE with stochastic noise (Wiener process σ=2%), dual respiration model (tilapia polynomial R²=0.99 + allometric fallback), size-dependent feeding rates, feeding response behavior |
-| **Disease** | SEIR compartmental model with immunity waning (R→S at 1/30 per day), temperature-dependent pathogen virulence, stress-triggered outbreaks, 4 treatment options + vaccination |
-| **Economics** | Ornstein-Uhlenbeck stochastic feed pricing, seasonal market multipliers (Christmas +15%, Lent +10%, mid-year dip -5%), marginal cost tracking, weight-dependent fish valuation with market premium curve |
+| **Disease** | SEIR compartmental model with immunity waning (R→S at 1/30 per day), temperature-dependent pathogen virulence, stress-triggered outbreaks, 4 treatment options + prophylactic vaccination (works without active disease) |
+| **Economics** | Ornstein-Uhlenbeck stochastic feed pricing, seasonal market multipliers (Christmas +15%, Lent +10%, mid-year dip -5%), marginal cost tracking, weight-dependent fish valuation with market premium curve, detailed cost breakdown (7 categories) |
 | **Weather** | Diel temperature/solar cycle, seasonal storm probability (3× during monsoon), Beaufort wind scale, humidity-driven evaporation |
 | **Events** | Equipment failures, power outages, algae blooms, feed shortages, market crashes — all wired to appropriate subsystems |
 
@@ -149,7 +149,7 @@ cd Agentic-Reinforcement-Learning
 pip install -r requirements.txt
 pip install -e .
 
-# Run tests (265 tests)
+# Run tests (276 tests)
 pytest tests/ -v
 
 # Start environment server
@@ -215,15 +215,15 @@ python inference.py
 ├── graders/
 │   ├── base_grader.py        # BaseGrader + GradeResult
 │   └── farm_graders.py       # 12 task-specific graders with partial credit
-├── tests/                    # 265 tests (2.0s)
+├── tests/                    # 276 tests (2.3s)
 │   ├── test_water_quality.py # DO, TAN, UIA, denitrification, evaporation, temperature
 │   ├── test_fish_biology.py  # Growth, mortality, stress, respiration, size-feeding
 │   ├── test_disease.py       # SEIR dynamics, treatments, vaccination, immunity, temperature
 │   ├── test_economics.py     # Costs, stochastic pricing, seasonal markets, ROI, breakdown
-│   ├── test_simulator.py     # Integration, observations, heuristic, stochastic growth, nighttime risk
+│   ├── test_simulator.py     # Integration, observations, heuristic, stochastic growth, nighttime DO risk, vaccination prophylaxis, cost breakdown, harvest revenue
 │   ├── test_constants.py     # Parameter sanity, utility functions (32 tests)
 │   ├── test_tasks_grader.py  # Task definitions, all 12 graders
-│   ├── test_rewards.py       # All reward component keys, delta rewards, disease/harvest
+│   ├── test_rewards.py       # All reward component keys, delta rewards, disease/harvest, nighttime DO risk
 │   ├── test_models.py        # Action/Observation/State model validation
 │   └── test_endpoints.py     # /tasks, /grader, /baseline API endpoints
 └── docs/

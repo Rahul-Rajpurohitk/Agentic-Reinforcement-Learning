@@ -20,7 +20,7 @@ def _make_sim_state(growth_rate=2.0, mortality=0, survival=0.98, stress=0.1,
                     do=6.5, uia=0.01, wq_score=0.85, fcr=1.6,
                     profit=500, total_cost=100, total_hours=24,
                     weight=100.0, roi_pct=50.0, marginal_cost=0.5,
-                    market_price_multiplier=1.0):
+                    market_price_multiplier=1.0, nighttime_do_risk=0.0):
     """Build a minimal sim state for reward testing."""
     return {
         "fish": {
@@ -35,6 +35,7 @@ def _make_sim_state(growth_rate=2.0, mortality=0, survival=0.98, stress=0.1,
             "DO": do,
             "UIA": uia,
             "water_quality_score": wq_score,
+            "nighttime_do_risk": nighttime_do_risk,
         },
         "economics": {
             "current_profit": profit,
@@ -264,3 +265,33 @@ class TestHarvestTimingReward:
         state["harvested"] = False
         reward = _calculate_reward(state, None, {"timing": 1.0})
         assert reward == 0.0
+
+
+class TestNighttimeDORiskReward:
+    """Test nighttime DO crash risk reward component."""
+
+    def test_low_risk_positive(self):
+        state = _make_sim_state(nighttime_do_risk=0.1)
+        reward = _calculate_reward(state, None, {"do_risk": 1.0})
+        assert reward > 0.5
+
+    def test_high_risk_negative(self):
+        state = _make_sim_state(nighttime_do_risk=0.9)
+        reward = _calculate_reward(state, None, {"do_risk": 1.0})
+        assert reward < 0
+
+    def test_risk_gradient(self):
+        """Higher risk should give lower reward."""
+        r_safe = _calculate_reward(_make_sim_state(nighttime_do_risk=0.1), None, {"do_risk": 1.0})
+        r_mid = _calculate_reward(_make_sim_state(nighttime_do_risk=0.4), None, {"do_risk": 1.0})
+        r_danger = _calculate_reward(_make_sim_state(nighttime_do_risk=0.8), None, {"do_risk": 1.0})
+        assert r_safe > r_mid > r_danger
+
+    def test_risk_reduction_bonus(self):
+        """Reducing nighttime risk should give higher reward than increasing it."""
+        prev = _make_sim_state(nighttime_do_risk=0.6)
+        curr_better = _make_sim_state(nighttime_do_risk=0.3)
+        curr_worse = _make_sim_state(nighttime_do_risk=0.8)
+        r_better = _calculate_reward(curr_better, prev, {"do_risk": 1.0})
+        r_worse = _calculate_reward(curr_worse, prev, {"do_risk": 1.0})
+        assert r_better > r_worse

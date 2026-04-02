@@ -217,14 +217,15 @@ class EconomicsEngine:
         if self.market_price_multiplier == 1.0:
             self.market_price_multiplier = seasonal
 
-    def calculate_harvest_revenue(self, biomass_kg: float) -> float:
+    def calculate_harvest_revenue(self, biomass_kg: float, avg_weight_g: float = 250.0) -> float:
         """Calculate revenue from harvesting all fish.
 
-        Market price includes size premium: larger fish command higher prices.
-        Base: $3.00/kg. Premium for fish >300g: up to 20% more.
+        Uses the same weight-dependent pricing curve as calculate_fish_value
+        since actual harvest revenue should reflect size premiums.
+
+        Base: $3.00/kg with premiums/discounts by size (KB-03 Sec 6.1).
         """
-        base_price = ECONOMICS.market_price_per_kg * self.market_price_multiplier
-        return biomass_kg * base_price
+        return self.calculate_fish_value(biomass_kg, avg_weight_g)
 
     def calculate_fish_value(self, biomass_kg: float, avg_weight_g: float) -> float:
         """Current value of fish stock (potential revenue).

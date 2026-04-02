@@ -192,6 +192,28 @@ def calculate_reward(
             timing_r = 0.0  # no disease = neutral
         reward += reward_weights["treatment_timing"] * timing_r
 
+    # ---- Nighttime DO risk ----
+    # Penalize high nighttime DO crash risk; reward proactive aeration.
+    # This incentivizes agents to act BEFORE a crash happens, not just react.
+    if "do_risk" in reward_weights:
+        nighttime_risk = water.get("nighttime_do_risk", 0.0)
+        if nighttime_risk <= 0.2:
+            risk_r = 1.0  # safe
+        elif nighttime_risk <= 0.5:
+            risk_r = 1.0 - (nighttime_risk - 0.2) / 0.3  # 1.0 → 0.0
+        elif nighttime_risk <= 0.8:
+            risk_r = -(nighttime_risk - 0.5) / 0.3  # 0.0 → -1.0
+        else:
+            risk_r = -1.0  # imminent crash
+
+        # Delta bonus: reward reducing risk
+        if prev_state is not None:
+            prev_risk = prev_state["water"].get("nighttime_do_risk", 0.0)
+            delta_risk = nighttime_risk - prev_risk
+            risk_r -= delta_risk * 0.5  # rising risk = penalty, falling = bonus
+
+        reward += reward_weights["do_risk"] * max(-1.0, min(1.0, risk_r))
+
     # ---- Harvest timing ----
     # Reward strategic harvest at market weight with good market price.
     if "timing" in reward_weights:

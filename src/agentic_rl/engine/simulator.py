@@ -303,11 +303,19 @@ class FishFarmSimulator:
             rng_value=self.rng.random(),
         )
 
-        # Apply treatment if requested and disease is active
-        if treatment != "none" and self.disease.is_active:
-            if not self.disease.treatment_active:
-                self.disease.apply_treatment(treatment)
-            self.economics.record_treatment(treatment)
+        # Apply treatment if requested
+        # Vaccination works as prophylaxis even without active disease (KB-03 Sec 4.2)
+        # Other treatments only apply when disease is active
+        if treatment != "none":
+            if treatment == "vaccination":
+                # Vaccination is preventive — works anytime, moves S → R
+                if not self.disease.treatment_active:
+                    self.disease.apply_treatment(treatment)
+                self.economics.record_treatment(treatment)
+            elif self.disease.is_active:
+                if not self.disease.treatment_active:
+                    self.disease.apply_treatment(treatment)
+                self.economics.record_treatment(treatment)
 
         # Advance disease model (temperature affects pathogen virulence)
         disease_deaths = self.disease.step(
@@ -499,6 +507,7 @@ class FishFarmSimulator:
                 "roi_pct": round(self.economics.roi(
                     self.fish.biomass_kg, self.fish.weight_g
                 ), 2),
+                "cost_breakdown": self.economics.cost_breakdown(),
             },
             "weather": {
                 "air_temp": round(weather["air_temp"], 1),
