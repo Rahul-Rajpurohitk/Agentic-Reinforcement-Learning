@@ -271,17 +271,17 @@ The built-in heuristic agent (rule-based, no LLM needed) scores well across all 
 | `disease_outbreak` | Medium | **0.990** | Early vaccination before disease onset |
 | `storm_response` | Hard | **0.981** | Pre-storm DO supersaturation + minimal feeding during outage |
 | `ammonia_crisis` | Medium | **0.900** | Aggressive water exchange + feeding reduction |
-| `catastrophe_prevention` | Extreme | **0.891** | Immediate harvest before compound crises cascade |
 | `feeding_basics` | Easy | **0.857** | Growth-stage feeding with size-dependent rates |
-| `growth_optimization` | Medium | **0.842** | FCR optimization via feeding strategy |
 | `water_quality_balance` | Easy | **0.839** | Balanced aeration + exchange with cost awareness |
-| `multi_objective` | Hard | **0.702** | Early harvest to lock in positive profit |
+| `catastrophe_prevention` | Extreme | **0.817** | Survive through compound crises, harvest after engagement |
 | `temperature_stress` | Medium | **0.703** | Active cooling + reduced metabolic load |
+| `growth_optimization` | Medium | **0.559** | Moderate feeding for growth + FCR balance |
+| `multi_objective` | Hard | **0.469** | Balanced management over 180+ hours |
 | `full_growout` | Hard | **0.446** | Cost management over 60-day cycle |
 | `season_management` | Extreme | **0.362** | Feed conservation + end-of-season harvest |
-| **Average** | | **0.793** | |
+| **Average** | | **0.744** | |
 
-The hard/extreme tasks have lower scores by design — they present genuinely difficult optimization challenges where an LLM agent with multi-step reasoning should outperform simple heuristics.
+The difficulty gradient is clear: Easy (0.899) → Medium (0.788) → Hard (0.632) → Extreme (0.589). Hard and extreme tasks present genuinely difficult optimization challenges where an LLM agent with multi-step reasoning should significantly outperform rule-based heuristics. Graders enforce engagement — early termination gaming is penalized.
 
 ---
 

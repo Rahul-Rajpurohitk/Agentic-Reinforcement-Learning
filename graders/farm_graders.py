@@ -212,22 +212,32 @@ class FarmGrader(BaseGrader):
         Components:
           weight   (0.40): min(1, actual/target) — target is 120g
           fcr      (0.30): max(0, (2.5-fcr)/1.0) — full at FCR≤1.5, 0 at FCR≥2.5
+                           REQUIRES actual growth (weight > initial) — zero feeding = 0
           survival (0.20): min(1, actual/0.98) — normalized to 98% baseline
           wq       (0.10): average water_quality_score
         """
         fish = state["fish"]
         target = config.get("target_weight", 120.0)
+        initial_weight = config["initial_conditions"]["weight_g"]
 
         weight_score = min(1.0, fish["weight_g"] / target) * 0.4
+
         fcr = fish.get("fcr", 3.0)
-        fcr_score = max(0, min(1.0, (2.5 - fcr) / 1.0)) * 0.3
+        # FCR is only meaningful if fish actually grew — zero feeding is not "optimization"
+        grew = fish["weight_g"] > initial_weight
+        if not grew or fcr <= 0:
+            fcr_score = 0.0
+        else:
+            fcr_score = max(0, min(1.0, (2.5 - fcr) / 1.0)) * 0.3
+
         survival_score = min(1.0, fish["survival_rate"] / 0.98) * 0.2
         avg_wq = sum(h["water"]["water_quality_score"] for h in history) / max(1, len(history))
         wq_score = avg_wq * 0.1
 
         score = weight_score + fcr_score + survival_score + wq_score
         return GradeResult(score=round(score, 3), passed=score >= 0.5,
-                          feedback=f"Weight: {fish['weight_g']:.1f}g/{target}g, FCR: {fcr:.2f}")
+                          feedback=f"Weight: {fish['weight_g']:.1f}g/{target}g, "
+                                  f"FCR: {fcr:.2f}, Grew: {grew}")
 
     def _full_growout_grader(self, state, history, config) -> GradeResult:
         """Full growout: 60-day cycle from fingerling to market weight.
@@ -292,17 +302,19 @@ class FarmGrader(BaseGrader):
                           feedback=f"Survival: {survival:.1%} through storm")
 
     def _multi_objective_grader(self, state, history, config) -> GradeResult:
-        """Multi-objective: balance profit, welfare, and water quality.
+        """Multi-objective: balance profit, welfare, and water quality OVER TIME.
 
-        Score = geometric_mean(profit_norm, welfare, avg_wq)^(1/3)
+        Score = geometric_mean(profit_norm, welfare, avg_wq)^(1/3) × engagement
 
-        This uses a geometric mean (not sum) so ALL three dimensions must
-        be positive. If any component is 0, the entire score is 0.
+        Engagement factor: must run ≥25% of episode for full credit.
+        Early harvest gaming (cashing out immediately) is penalized because
+        "balancing objectives" requires sustained management, not avoidance.
 
         Normalization:
           profit_norm: max(0, profit) / 3000 — $3K is the benchmark
           welfare: max(0, 1 - avg_stress/0.3) — stress=0→1.0, stress≥0.3→0.0
           avg_wq: average water_quality_score (already 0-1)
+          engagement: min(1, episode_hours / (max_hours × 0.25))
         """
         profit = max(0, state["economics"]["current_profit"])
         profit_norm = min(1.0, profit / 3000)
@@ -312,9 +324,19 @@ class FarmGrader(BaseGrader):
 
         avg_wq = sum(h["water"]["water_quality_score"] for h in history) / max(1, len(history))
 
-        score = (profit_norm * welfare * avg_wq) ** (1/3)
-        return GradeResult(score=round(score, 3), passed=score >= 0.4,
-                          feedback=f"Profit: ${profit:.0f}, Welfare: {welfare:.2f}, WQ: {avg_wq:.3f}")
+        raw_score = (profit_norm * welfare * avg_wq) ** (1/3)
+
+        # Engagement: must actually manage the farm, not just harvest immediately
+        max_hours = config.get("episode_hours", 720)
+        episode_hours = len(history)
+        engagement = min(1.0, episode_hours / (max_hours * 0.25))
+
+        score = raw_score * engagement
+        return GradeResult(
+            score=round(score, 3), passed=score >= 0.4,
+            feedback=f"Profit: ${profit:.0f}, Welfare: {welfare:.2f}, "
+                    f"WQ: {avg_wq:.3f}, Engagement: {engagement:.2f}"
+        )
 
     def _catastrophe_grader(self, state, history, config) -> GradeResult:
         """Catastrophe prevention: survive 5 compound crises in 14 days.
@@ -326,6 +348,9 @@ class FarmGrader(BaseGrader):
           disease   (0.15): max(0, 1 - deaths/500) — linear decay per death
           crisis    (0.10): recovery speed after worst DO event (fast=0.10, slow=0.02)
           timing    (0.10): bonus for harvesting before fish value drops further
+
+        Engagement: must survive ≥25% of episode. Evacuating fish before crises
+        hit is avoidance, not prevention. Scores are multiplied by engagement.
         """
         survival = state["fish"]["survival_rate"]
         profit = state["economics"]["current_profit"]
@@ -356,13 +381,22 @@ class FarmGrader(BaseGrader):
 
         timing_score = 0.1 if state["harvested"] else 0.0
 
-        score = survival_score + profit_score + wq_score + disease_score + crisis_response + timing_score
+        raw_score = survival_score + profit_score + wq_score + disease_score + crisis_response + timing_score
+
+        # Engagement: "catastrophe prevention" means surviving THROUGH crises,
+        # not evacuating before they hit. Must endure ≥25% of episode.
+        max_hours = config.get("episode_hours", 336)
+        episode_hours = len(history)
+        engagement = min(1.0, episode_hours / (max_hours * 0.25))
+
+        score = raw_score * engagement
 
         details = [
             f"Survival: {survival:.1%} [{survival_score:.2f}/0.30]",
             f"Profit: ${profit:.0f} [{profit_score:.2f}/0.20]",
             f"Disease deaths: {disease_deaths} [{disease_score:.2f}/0.15]",
             f"Crisis response [{crisis_response:.2f}/0.10]",
+            f"Engagement: {engagement:.2f}",
             f"Harvested: {'yes' if state['harvested'] else 'no'}",
         ]
         return GradeResult(score=round(min(1.0, score), 3), passed=score >= 0.3,

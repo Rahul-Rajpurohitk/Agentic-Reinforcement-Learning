@@ -564,9 +564,13 @@ class TestTaskSpecificHeuristics:
         action_expensive = heuristic_action(obs_expensive, "feeding_basics", step=10, max_hours=168)
         assert action_expensive["feeding_rate"] < action_cheap["feeding_rate"]
 
-    def test_catastrophe_early_harvest(self):
-        """Catastrophe: should harvest immediately to avoid mass mortality."""
+    def test_catastrophe_survives_through_crises(self):
+        """Catastrophe: endure crises, harvest after engagement threshold (≥84h)."""
         from inference import heuristic_action
         obs = self._base_obs(avg_fish_weight=250.0)
-        action = heuristic_action(obs, "catastrophe_prevention", step=2, max_hours=336)
-        assert action["harvest_decision"] is True
+        # Early: should NOT harvest (engagement penalty in grader)
+        action_early = heuristic_action(obs, "catastrophe_prevention", step=2, max_hours=336)
+        assert action_early["harvest_decision"] is False
+        # After engagement threshold: harvest to lock in survival
+        action_late = heuristic_action(obs, "catastrophe_prevention", step=90, max_hours=336)
+        assert action_late["harvest_decision"] is True

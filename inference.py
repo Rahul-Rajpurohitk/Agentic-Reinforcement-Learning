@@ -292,17 +292,15 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         if not biofilter_ok:
             treatment = "probiotics" if treatment == "none" else treatment
 
-    # Multi-objective: geometric mean of (profit × welfare × water_quality)
-    # ALL three must be > 0. If profit goes negative, score = 0 (geometric mean = 0).
-    # Strategy: minimize costs, keep stress low, harvest EARLY while profit is positive.
-    # Operating costs (~$125/day) exceed daily fish value growth, so every day
-    # the fish stay in the tank, profit drops. Harvest early to lock in profit.
+    # Multi-objective: geometric mean of (profit × welfare × water_quality) × engagement
+    # Must run ≥25% of episode (180h) for full credit. Balance all three objectives.
+    # Strategy: keep costs low, stress low, WQ high, harvest when profitable near 25% mark
     if task_id == "multi_objective":
         # Minimal feeding → low ammonia → low stress → high welfare
-        feeding = min(feeding, 0.15)
+        feeding = min(feeding, 0.20)
         # Low aeration (DO is already high at 10+)
         aeration = min(aeration, 0.3) if DO > 6.0 else max(aeration, 0.5)
-        # Zero water exchange (save $1/hr = $720/month)
+        # Minimal water exchange (save costs)
         exchange = 0.005 if UIA < 0.05 else 0.02
         # Keep stress low
         if stress > 0.2:
@@ -317,14 +315,29 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         if UIA < 0.03 and TAN < 0.5:
             exchange = min(exchange, 0.01)
 
-    # Growth optimization: zero feeding → FCR=0 → full fcr_score (0.30)!
-    # Grader: fcr_score = max(0, (2.5-fcr)/1.0) * 0.30, so fcr=0 → 0.30 points.
-    # Weight loss from catabolism (~6g) costs only 0.02 in weight_score (0.4 weight).
-    # Net gain: +0.28 score vs aggressive feeding (FCR=3.24 → fcr_score=0).
+    # Growth optimization: feed efficiently to maximize weight gain with good FCR
+    # Target: 80g → 120g+ with FCR < 2.0
     if task_id == "growth_optimization":
-        feeding = 0.0  # no feeding → FCR=0 → full marks
-        aeration = min(aeration, 0.3)  # minimal aeration (save costs, DO stays high)
-        exchange = min(exchange, 0.005)  # minimal exchange (no ammonia without feeding)
+        # Moderate feeding — enough to grow but keep FCR low
+        if is_daytime and UIA < 0.04 and DO > 5.0:
+            feeding = 0.5  # good conditions: feed well
+        elif is_daytime:
+            feeding = 0.35  # suboptimal: reduce
+        else:
+            feeding = 0.25  # nighttime: conservative
+        if UIA > 0.05:
+            exchange = max(exchange, 0.03)  # flush ammonia to keep feeding
+
+    # Catastrophe prevention: survive through compound crises
+    # Events: h12 algae bloom, h48 aerator fail, h120 disease, h168 market crash, h240 feed shortage
+    if task_id == "catastrophe_prevention":
+        # Aggressive aeration throughout (algae bloom + aerator failure)
+        aeration = max(aeration, 0.7)
+        # Conservative feeding to minimize ammonia load during crises
+        feeding = min(feeding, 0.3)
+        # Extra water exchange during ammonia concerns
+        if UIA > 0.03:
+            exchange = max(exchange, 0.04)
 
     # Full growout: maintain water quality for growth (profit_score is 0 regardless)
     if task_id == "full_growout":
@@ -351,12 +364,11 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
         harvest = True
     elif task_id == "season_management" and weight >= 350 and hours_left <= 240:
         harvest = True
-    # Multi-objective: harvest EARLY while profit is still positive
-    # (operating costs exceed fish value growth, profit drops ~$125/day)
-    elif task_id == "multi_objective" and step >= 1 and profit > 0:
-        harvest = True  # harvest ASAP while profit is maximum
-    elif task_id == "multi_objective" and step >= 24:
-        harvest = True  # harvest by Day 1 regardless
+    # Multi-objective: harvest after engagement threshold (25% = 180h) while profitable
+    elif task_id == "multi_objective" and step >= 180 and profit > 0:
+        harvest = True  # met engagement, lock in profit
+    elif task_id == "multi_objective" and step >= 200:
+        harvest = True  # must harvest before costs erode profit further
     # Growth optimization: harvest near end if profitable
     elif task_id == "growth_optimization" and weight >= 120 and hours_left <= 24:
         harvest = True
@@ -369,11 +381,13 @@ def heuristic_action(obs: Dict[str, Any], task_id: str, step: int, max_hours: in
     # Full growout / season: always harvest on last day for harvest_bonus
     elif task_id in ("full_growout", "season_management") and hours_left <= 1:
         harvest = True
-    # Catastrophe: harvest IMMEDIATELY before algae bloom (h12) destroys DO and kills fish.
-    # Grader rewards survival (0.30), profit (0.20), WQ (0.15), disease (0.15),
-    # crisis_response (0.10), timing (0.10). Early harvest maxes ALL components.
-    elif task_id == "catastrophe_prevention" and step >= 1:
-        harvest = True
+    # Catastrophe: must survive through crises (engagement ≥25% = 84h).
+    # Crises: h12 algae bloom, h48 aerator failure, h120 disease, h168 market crash, h240 feed shortage
+    # Harvest after enduring the first major crises to lock in survival + profit.
+    elif task_id == "catastrophe_prevention" and step >= 84 and profit > -500:
+        harvest = True  # met engagement, survived through crises
+    elif task_id == "catastrophe_prevention" and step >= 100:
+        harvest = True  # harvest before things get worse
 
     return {
         "feeding_rate": round(feeding, 2),
