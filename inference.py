@@ -641,6 +641,8 @@ async def run_task_ws(
         obs = resp_data.get("observation", {})
         is_done = resp_data.get("done", False)
 
+        print(f"[START] task={task_id}", flush=True)
+
         current_action = heuristic_action(obs, task_id, 0, max_hours)
 
         while not is_done and steps < max_hours:
@@ -703,6 +705,8 @@ async def run_task_ws(
             history.append(obs)
             steps += 1
 
+            print(f"[STEP] step={steps} reward={reward}", flush=True)
+
             if len(history) > MAX_HISTORY * 2:
                 history = history[-MAX_HISTORY:]
 
@@ -724,6 +728,8 @@ async def run_task_ws(
     elapsed = time.time() - start_time
     # Final reward is the last step's reward (grader score on done)
     final_reward = reward if reward else 0
+
+    print(f"[END] task={task_id} score={final_reward} steps={steps}", flush=True)
 
     print(f"  Result: score={final_reward:.3f}, steps={steps}, "
           f"time={elapsed:.1f}s, LLM={llm_calls}, heuristic={heuristic_calls}")

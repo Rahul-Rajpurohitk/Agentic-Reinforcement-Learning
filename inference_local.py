@@ -99,6 +99,8 @@ def run_task_local(
     obs = env.reset(task_id=task_id)
     obs_dict = obs.model_dump()
 
+    print(f"[START] task={task_id}", flush=True)
+
     history: List[Dict[str, Any]] = []
     steps = 0
     start_time = time.time()
@@ -168,8 +170,11 @@ def run_task_local(
         obs = env.step(action)
         obs_dict = obs.model_dump()
 
+        reward = obs_dict.get("reward", 0) or 0
         history.append(obs_dict)
         steps += 1
+
+        print(f"[STEP] step={steps} reward={reward}", flush=True)
 
         if len(history) > MAX_HISTORY * 2:
             history = history[-MAX_HISTORY:]
@@ -186,6 +191,8 @@ def run_task_local(
 
     elapsed = time.time() - start_time
     final_score = obs_dict.get("reward", 0) or 0
+
+    print(f"[END] task={task_id} score={final_score} steps={steps}", flush=True)
 
     print(f"  Result: score={final_score:.3f}, steps={steps}, "
           f"time={elapsed:.1f}s, LLM={llm_calls}, heuristic={heuristic_calls}")
