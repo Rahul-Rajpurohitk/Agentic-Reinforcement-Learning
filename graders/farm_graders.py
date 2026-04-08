@@ -27,7 +27,10 @@ class FarmGrader(BaseGrader):
     ) -> GradeResult:
         grader_name = task_config.get("grader", "default")
         method = getattr(self, f"_{grader_name}", self._default_grader)
-        return method(final_state, episode_history, task_config)
+        result = method(final_state, episode_history, task_config)
+        # Clamp score to strict (0, 1) — validators reject exact 0.0 or 1.0
+        result.score = max(0.001, min(0.999, result.score))
+        return result
 
     def _feeding_grader(self, state, history, config) -> GradeResult:
         """Feeding basics: grow fish to target weight with good FCR and survival.
